@@ -143,6 +143,7 @@ function startApp() {
   var activeCategory = "placas";
   var meshStates = {};
   var dirtyKeys = {};
+  var modelBox = null;
 
   var container = document.getElementById('canvas-container');
   var scene = new THREE.Scene();
@@ -152,6 +153,7 @@ function startApp() {
   camera.position.set(4000, 3000, 4000);
 
   var renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.localClippingEnabled = true;
   renderer.setSize(window.innerWidth, window.innerHeight);
   container.appendChild(renderer.domElement);
 
@@ -431,6 +433,7 @@ function startApp() {
       scene.add(model);
 
       var box = new THREE.Box3().setFromObject(model);
+      modelBox = box;
       var center = box.getCenter(new THREE.Vector3());
       var size = box.getSize(new THREE.Vector3()).length();
       target.copy(center);
@@ -587,7 +590,7 @@ function startApp() {
   });
 
   // --- Captura de vistas del modelo para el informe ---
-  function snapshotView(theta, phi, radiusMul, highlightFn) {
+  function snapshotView(theta, phi, radiusMul, highlightFn, clipPlanes) {
     var savedOpacity = {}, savedTransparent = {};
     Object.keys(meshStates).forEach(function(k) {
       var e = meshStates[k];
@@ -602,8 +605,10 @@ function startApp() {
     spherical.phi = phi;
     spherical.radius = defaultSpherical.radius * radiusMul;
     updateCameraFromSpherical();
+    renderer.clippingPlanes = clipPlanes || [];
     renderer.render(scene, camera);
     var dataUrl = renderer.domElement.toDataURL('image/png');
+    renderer.clippingPlanes = [];
 
     Object.keys(meshStates).forEach(function(k) {
       var e = meshStates[k];
@@ -642,12 +647,41 @@ function startApp() {
       if (e.category === 'placas') countsPlacas[name]++; else countsEstructura[name]++;
     });
 
+    // --- Determinar el eje real que separa izquierda de derecha, usando la geometria real ---
+    var sumZIzq = 0, nZIzq = 0, sumZDer = 0, nZDer = 0;
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      var pos = new THREE.Vector3();
+      e.mesh.getWorldPosition(pos);
+      if (isIzq(e)) { sumZIzq += pos.z; nZIzq++; }
+      if (isDer(e)) { sumZDer += pos.z; nZDer++; }
+    });
+    var avgZIzq = nZIzq ? sumZIzq / nZIzq : 0;
+    var avgZDer = nZDer ? sumZDer / nZDer : 1;
+    var centerZ = modelBox ? (modelBox.min.z + modelBox.max.z) / 2 : 0;
+    var izqIsLowerZ = avgZIzq < avgZDer;
+
+    // Plano que deja visible solo el lado "izq" (corta el lado "der")
+    var clipKeepIzq = izqIsLowerZ
+      ? [new THREE.Plane(new THREE.Vector3(0,0,-1), centerZ)]
+      : [new THREE.Plane(new THREE.Vector3(0,0,1), -centerZ)];
+    // Plano que deja visible solo el lado "der" (corta el lado "izq")
+    var clipKeepDer = izqIsLowerZ
+      ? [new THREE.Plane(new THREE.Vector3(0,0,1), -centerZ)]
+      : [new THREE.Plane(new THREE.Vector3(0,0,-1), centerZ)];
+    // Franja central: corta ambos extremos, deja visible solo la banda del medio
+    var band = modelBox ? (modelBox.max.z - modelBox.min.z) * 0.18 : 0.2;
+    var clipKeepCentral = [
+      new THREE.Plane(new THREE.Vector3(0,0,-1), centerZ + band),
+      new THREE.Plane(new THREE.Vector3(0,0,1), -(centerZ - band))
+    ];
+
     // --- Capturas: placas izq/der y estructura izq/der/central (solo piezas con cambio) ---
-    var imgPlacasIzq = snapshotView(Math.PI/2, Math.PI/2.3, 0.75, function(e) { return e.category==='placas' && e.state!==0 && isIzq(e); });
-    var imgPlacasDer = snapshotView(-Math.PI/2, Math.PI/2.3, 0.75, function(e) { return e.category==='placas' && e.state!==0 && isDer(e); });
-    var imgEstructIzq = snapshotView(Math.PI/2, Math.PI/2.3, 0.85, function(e) { return e.category==='estructura' && e.state!==0 && isIzq(e); });
-    var imgEstructDer = snapshotView(-Math.PI/2, Math.PI/2.3, 0.85, function(e) { return e.category==='estructura' && e.state!==0 && isDer(e); });
-    var imgEstructCentral = snapshotView(defaultSpherical.theta, Math.PI/2.6, 1.1, function(e) { return e.category==='estructura' && e.state!==0 && isCentral(e); });
+    var imgPlacasIzq = snapshotView(Math.PI/2, Math.PI/2.3, 0.75, function(e) { return e.category==='placas' && e.state!==0 && isIzq(e); }, clipKeepIzq);
+    var imgPlacasDer = snapshotView(-Math.PI/2, Math.PI/2.3, 0.75, function(e) { return e.category==='placas' && e.state!==0 && isDer(e); }, clipKeepDer);
+    var imgEstructIzq = snapshotView(Math.PI/2, Math.PI/2.3, 0.85, function(e) { return e.category==='estructura' && e.state!==0 && isIzq(e); }, clipKeepIzq);
+    var imgEstructDer = snapshotView(-Math.PI/2, Math.PI/2.3, 0.85, function(e) { return e.category==='estructura' && e.state!==0 && isDer(e); }, clipKeepDer);
+    var imgEstructCentral = snapshotView(defaultSpherical.theta, Math.PI/2.6, 1.1, function(e) { return e.category==='estructura' && e.state!==0 && isCentral(e); }, clipKeepCentral);
 
     // --- Conclusion legible, generada a partir de los conteos ---
     var totalPlacasCambio = countsPlacas['Cambio'] || 0;
