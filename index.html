@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Chute CV-201 - Inspeccion</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; font-family: -apple-system, Arial, sans-serif; background:#f1efe8; }
+  #canvas-container { width:100%; height:100%; }
+  #ui {
+    position:fixed; top:12px; left:12px; z-index:10;
+    background:rgba(255,255,255,0.94); border-radius:10px; padding:12px 16px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.12); max-width:290px;
+  }
+  #ui h3 { margin:0 0 10px; font-size:14px; font-weight:600; color:#2C2C2A; }
+  #category-toggle { display:flex; gap:6px; margin-bottom:12px; }
+  .cat-btn {
+    flex:1; padding:7px 4px; font-size:12px; border-radius:6px; border:1px solid #ccc;
+    background:#fff; cursor:pointer; color:#555; text-align:center;
+  }
+  .cat-btn.active { background:#2C2C2A; color:#fff; border-color:#2C2C2A; }
+  .legend-item { display:flex; align-items:center; gap:8px; font-size:12px; color:#444; margin:4px 0; }
+  .swatch { width:12px; height:12px; border-radius:3px; flex-shrink:0; border:1px solid rgba(0,0,0,0.15); }
+  #counts { margin-top:10px; padding-top:10px; border-top:1px solid #ddd; font-size:12px; color:#555; }
+  #counts div { display:flex; justify-content:space-between; margin:2px 0; }
+  #selected-info {
+    position:fixed; top:12px; right:12px; z-index:10;
+    background:rgba(255,255,255,0.94); border-radius:10px; padding:12px 16px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.12); font-size:13px; color:#2C2C2A;
+    min-width:200px; display:none;
+  }
+  #selected-info strong { display:block; margin-bottom:6px; font-size:14px; }
+  #loading {
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    font-size:14px; color:#888; z-index:20;
+  }
+  #btn-reset, #btn-save { margin-top:8px; width:100%; padding:8px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:12px; }
+  #btn-save { background:#2C2C2A; color:#fff; border-color:#2C2C2A; font-weight:600; }
+  #btn-save:disabled { background:#ccc; border-color:#ccc; cursor:default; }
+  #save-status { font-size:11px; color:#888; margin-top:6px; text-align:center; min-height:14px; }
+  #turno-input { width:100%; padding:6px; font-size:12px; border-radius:6px; border:1px solid #ccc; margin-top:8px; box-sizing:border-box; }
+  #turno-label { font-size:11px; color:#888; margin-top:8px; display:block; }
+  .type-label {
+    position:absolute; z-index:15; pointer-events:none;
+    background:rgba(44,44,42,0.9); color:#fff; font-size:11px; padding:4px 8px;
+    border-radius:5px; white-space:nowrap; transform:translate(-50%, -130%);
+  }
+  .type-label:after {
+    content:''; position:absolute; left:50%; top:100%; transform:translateX(-50%);
+    border:5px solid transparent; border-top-color:rgba(44,44,42,0.9);
+  }
+</style>
+</head>
+<body>
+<div id="canvas-container"></div>
+<div id="ui">
+  <h3>Chute CV-201</h3>
+  <div id="category-toggle">
+    <div class="cat-btn" id="btn-cat-estructura">Estructura</div>
+    <div class="cat-btn active" id="btn-cat-placas">Placas guia</div>
+  </div>
+  <div id="legend"></div>
+  <div id="counts"></div>
+  <label id="turno-label">Supervisor / turno</label>
+  <input id="turno-input" type="text" placeholder="Ej: Juan Perez - Turno A">
+  <button id="btn-save">Guardar cambios</button>
+  <div id="save-status"></div>
+  <button id="btn-reset">Restablecer vista</button>
+</div>
+<div id="selected-info">
+  <strong id="sel-name">-</strong>
+  <div id="sel-state">-</div>
+</div>
+<div id="loading">Cargando modelo 3D...</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+  import { getDatabase, ref, update, onValue, get } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAT0v3K_kG8btaVrBB2JkyOIhhj_bnlEOI",
+    authDomain: "chute-alimentacion.firebaseapp.com",
+    databaseURL: "https://chute-alimentacion-default-rtdb.firebaseio.com",
+    projectId: "chute-alimentacion",
+    storageBucket: "chute-alimentacion.firebasestorage.app",
+    messagingSenderId: "572646669749",
+    appId: "1:572646669749:web:f4f75a847b56069a466dfc"
+  };
+  const fbApp = initializeApp(firebaseConfig);
+  const db = getDatabase(fbApp);
+
+  window.__fb = { ref, update, onValue, get, db };
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script>
+window.addEventListener('DOMContentLoaded', function () {
+  var waitForFirebase = setInterval(function () {
+    if (window.__fb) {
+      clearInterval(waitForFirebase);
+      startApp();
+    }
+  }, 50);
+});
+
+function startApp() {
+  var fb = window.__fb;
+  var COLOR_STEEL = 0x8B95A1;
+  var COLOR_LIGHTGRAY = 0xD9D7CF;
+  var COLOR_GREEN = 0x639922;
+  var COLOR_RED = 0xE24B4A;
+  var COLOR_YELLOW = 0xFAC775;
+  var DIM_OPACITY = 0.2;
+
+  var CATEGORIES = {
+    estructura: {
+      label: "Estructura",
+      prefix: "Pm-",
+      baseColor: COLOR_STEEL,
+      states: [
+        { name: "No inspeccionado", color: COLOR_STEEL },
+        { name: "Cambio", color: COLOR_GREEN },
+        { name: "Proximo a cambio", color: COLOR_YELLOW }
+      ]
+    },
+    placas: {
+      label: "Placas guia",
+      prefix: "Pg-",
+      baseColor: COLOR_LIGHTGRAY,
+      states: [
+        { name: "No inspeccionado", color: COLOR_LIGHTGRAY },
+        { name: "Cambio", color: COLOR_GREEN },
+        { name: "Volteo", color: COLOR_RED },
+        { name: "Proxima mantencion", color: COLOR_YELLOW }
+      ]
+    }
+  };
+
+  var activeCategory = "placas";
+  var meshStates = {};
+  var dirtyKeys = {};
+
+  var container = document.getElementById('canvas-container');
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xf1efe8);
+
+  var camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 50000);
+  camera.position.set(4000, 3000, 4000);
+
+  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  container.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  var dirLight = new THREE.DirectionalLight(0xffffff, 0.55);
+  dirLight.position.set(1, 1, 1);
+  scene.add(dirLight);
+  var dirLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
+  dirLight2.position.set(-1, -0.5, -1);
+  scene.add(dirLight2);
+
+  var target = new THREE.Vector3(0,0,0);
+  var isDragging = false, prevX = 0, prevY = 0;
+  var spherical = new THREE.Spherical();
+  var offset = new THREE.Vector3();
+  var minRadius = 1, maxRadius = 100000;
+  var defaultSpherical = { theta: Math.PI/4, phi: Math.PI/3, radius: 1000 };
+
+  function updateCameraFromSpherical() {
+    offset.setFromSpherical(spherical);
+    camera.position.copy(target).add(offset);
+    camera.lookAt(target);
+  }
+
+  renderer.domElement.addEventListener('mousedown', function(e) {
+    isDragging = true; prevX = e.clientX; prevY = e.clientY;
+  });
+  window.addEventListener('mouseup', function() { isDragging = false; });
+  window.addEventListener('mousemove', function(e) {
+    if (!isDragging) return;
+    var dx = e.clientX - prevX, dy = e.clientY - prevY;
+    prevX = e.clientX; prevY = e.clientY;
+    spherical.theta -= dx * 0.005;
+    spherical.phi -= dy * 0.005;
+    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+    updateCameraFromSpherical();
+  });
+  renderer.domElement.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    spherical.radius *= (e.deltaY > 0) ? 1.1 : 0.9;
+    spherical.radius = Math.max(minRadius, Math.min(maxRadius, spherical.radius));
+    updateCameraFromSpherical();
+  }, { passive: false });
+
+  var loader = new THREE.GLTFLoader();
+  var raycaster = new THREE.Raycaster();
+  var mouse = new THREE.Vector2();
+  var typeLabelMeshes = []; // {mesh, text}
+
+  function renderLegend() {
+    var cat = CATEGORIES[activeCategory];
+    var html = '';
+    cat.states.forEach(function(s) {
+      html += '<div class="legend-item"><span class="swatch" style="background:#' + s.color.toString(16).padStart(6,'0') + '"></span>' + s.name + '</div>';
+    });
+    document.getElementById('legend').innerHTML = html;
+  }
+
+  function renderCounts() {
+    var cat = CATEGORIES[activeCategory];
+    var counts = cat.states.map(function() { return 0; });
+    var total = 0;
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      if (e.category === activeCategory) {
+        counts[e.state]++;
+        total++;
+      }
+    });
+    var html = '<div><span>Total</span><strong>' + total + '</strong></div>';
+    cat.states.forEach(function(s, i) {
+      html += '<div><span>' + s.name + '</span><strong>' + counts[i] + '</strong></div>';
+    });
+    document.getElementById('counts').innerHTML = html;
+  }
+
+  function applyCategoryVisuals() {
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      var isActive = (e.category === activeCategory);
+      var stateDef = CATEGORIES[e.category].states[e.state];
+      e.mesh.material.color.setHex(stateDef.color);
+      if (isActive) {
+        e.mesh.material.transparent = false;
+        e.mesh.material.opacity = 1;
+      } else {
+        e.mesh.material.transparent = true;
+        e.mesh.material.opacity = DIM_OPACITY;
+      }
+    });
+    updateTypeLabelsVisibility();
+    renderLegend();
+    renderCounts();
+    document.getElementById('selected-info').style.display = 'none';
+  }
+
+  function setCategory(cat) {
+    activeCategory = cat;
+    document.getElementById('btn-cat-estructura').classList.toggle('active', cat === 'estructura');
+    document.getElementById('btn-cat-placas').classList.toggle('active', cat === 'placas');
+    applyCategoryVisuals();
+  }
+
+  document.getElementById('btn-cat-estructura').addEventListener('click', function() { setCategory('estructura'); });
+  document.getElementById('btn-cat-placas').addEventListener('click', function() { setCategory('placas'); });
+
+  // --- Etiquetas de tipo (una por tipo, con cantidad) ---
+  function buildTypeLabels() {
+    var seen = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var entry = meshStates[k];
+      var m = entry.label.match(/^(Pg|Pm)-(izq|der|sup|ant)?-?([A-Z]{2}-\d{2})/);
+      var typeKey = m ? (m[1] + '-' + m[3]) : entry.label;
+      if (!seen[typeKey]) seen[typeKey] = { count: 0, sample: entry, code: m ? m[3] : entry.label };
+      seen[typeKey].count++;
+    });
+    typeLabelMeshes = [];
+    Object.keys(seen).forEach(function(tk) {
+      var info = seen[tk];
+      var div = document.createElement('div');
+      div.className = 'type-label';
+      div.textContent = info.code + ' (x' + info.count + ')';
+      document.body.appendChild(div);
+      typeLabelMeshes.push({ mesh: info.sample.mesh, category: info.sample.category, el: div });
+    });
+  }
+
+  function updateTypeLabelsVisibility() {
+    typeLabelMeshes.forEach(function(t) {
+      t.el.style.display = (t.category === activeCategory) ? 'block' : 'none';
+    });
+  }
+
+  function updateTypeLabelPositions() {
+    var w = window.innerWidth, h = window.innerHeight;
+    typeLabelMeshes.forEach(function(t) {
+      if (t.el.style.display === 'none') return;
+      var pos = new THREE.Vector3();
+      t.mesh.getWorldPosition(pos);
+      pos.project(camera);
+      var x = (pos.x * 0.5 + 0.5) * w;
+      var y = (-pos.y * 0.5 + 0.5) * h;
+      if (pos.z > 1) { t.el.style.display = 'none'; return; }
+      t.el.style.display = 'block';
+      t.el.style.left = x + 'px';
+      t.el.style.top = y + 'px';
+    });
+  }
+
+  // --- Flecha de direccion de flujo ---
+  var flowMarkers = [];
+  var entryMarkers = [];
+  var flowDir = new THREE.Vector3();
+  var flowStart = new THREE.Vector3();
+  var flowLength = 1;
+  var entryStart = new THREE.Vector3();
+  var entryLength = 1;
+
+  function makeFlatArrowGeometry() {
+    var shape = new THREE.Shape();
+    shape.moveTo(0, 0.5);
+    shape.lineTo(1, 0);
+    shape.lineTo(0, -0.5);
+    shape.quadraticCurveTo(0.25, 0, 0, 0.5);
+    return new THREE.ShapeGeometry(shape);
+  }
+
+  function addFlowArrow(box) {
+    var size = box.getSize(new THREE.Vector3());
+    var longAxis = size.x >= size.z ? 'x' : 'z';
+    flowLength = (longAxis === 'x' ? size.x : size.z) * 0.9;
+    flowDir.copy(longAxis === 'x' ? new THREE.Vector3(1,0,0) : new THREE.Vector3(0,0,1));
+    flowStart.copy(box.getCenter(new THREE.Vector3()));
+    flowStart.y = box.min.y + size.y * 0.55;
+    if (longAxis === 'x') flowStart.x = box.min.x + size.x * 0.05; else flowStart.z = box.min.z + size.z * 0.05;
+
+    var markerLen = flowLength * 0.05;
+    var n = 6;
+    for (var i = 0; i < n; i++) {
+      var geo = makeFlatArrowGeometry();
+      geo.rotateX(-Math.PI / 2);
+      if (longAxis === 'z') geo.rotateY(Math.PI / 2);
+      geo.scale(markerLen, markerLen, markerLen);
+      var mat = new THREE.MeshBasicMaterial({ color: 0x639922, side: THREE.DoubleSide });
+      var mesh = new THREE.Mesh(geo, mat);
+      mesh.userData.offset = i / n;
+      scene.add(mesh);
+      flowMarkers.push(mesh);
+    }
+  }
+
+  function addEntryArrow(box) {
+    var size = box.getSize(new THREE.Vector3());
+    entryLength = size.y * 1.1;
+    entryStart.copy(box.getCenter(new THREE.Vector3()));
+    entryStart.y = box.max.y + entryLength;
+    var longAxis = size.x >= size.z ? 'x' : 'z';
+    if (longAxis === 'x') entryStart.x = box.min.x + size.x * 0.18; else entryStart.z = box.min.z + size.z * 0.18;
+
+    var markerLen = flowLength * 0.05;
+    var n = 4;
+    for (var i = 0; i < n; i++) {
+      var geo = makeFlatArrowGeometry();
+      geo.rotateZ(-Math.PI / 2);
+      geo.scale(markerLen, markerLen, markerLen);
+      var mat = new THREE.MeshBasicMaterial({ color: 0x639922, side: THREE.DoubleSide });
+      var mesh = new THREE.Mesh(geo, mat);
+      mesh.userData.offset = i / n;
+      scene.add(mesh);
+      entryMarkers.push(mesh);
+    }
+  }
+
+  function updateFlowMarkers(t) {
+    var speed = 0.15;
+    flowMarkers.forEach(function(m) {
+      var p = (t * speed + m.userData.offset) % 1;
+      m.position.copy(flowStart).addScaledVector(flowDir, p * flowLength);
+      var fade = Math.min(p * 6, (1 - p) * 6, 1);
+      m.material.opacity = 0.35 + fade * 0.65;
+      m.material.transparent = true;
+    });
+    entryMarkers.forEach(function(m) {
+      var p = (t * speed + m.userData.offset) % 1;
+      m.position.copy(entryStart);
+      m.position.y = entryStart.y - p * entryLength;
+      var fade = Math.min(p * 6, (1 - p) * 6, 1);
+      m.material.opacity = 0.35 + fade * 0.65;
+      m.material.transparent = true;
+    });
+  }
+
+  fb.get(fb.ref(fb.db, 'estados')).then(function(snapshot) {
+    var saved = snapshot.exists() ? snapshot.val() : {};
+
+    loader.load('./chute.glb', function(gltf) {
+      var model = gltf.scene;
+      scene.add(model);
+
+      var box = new THREE.Box3().setFromObject(model);
+      var center = box.getCenter(new THREE.Vector3());
+      var size = box.getSize(new THREE.Vector3()).length();
+      target.copy(center);
+      defaultSpherical.radius = size * 1.2;
+      spherical.theta = defaultSpherical.theta;
+      spherical.phi = defaultSpherical.phi;
+      spherical.radius = defaultSpherical.radius;
+      minRadius = size * 0.05;
+      maxRadius = size * 5;
+      camera.near = size / 1000;
+      camera.far = size * 100;
+      camera.updateProjectionMatrix();
+      updateCameraFromSpherical();
+      addFlowArrow(box);
+      addEntryArrow(box);
+
+      model.traverse(function(child) {
+        if (child.isMesh) {
+          var name = child.name.replace(/-1$/, '');
+          var category = null;
+          if (name.indexOf(CATEGORIES.placas.prefix) === 0) category = 'placas';
+          else if (name.indexOf(CATEGORIES.estructura.prefix) === 0) category = 'estructura';
+          if (!category) return;
+          child.material = child.material.clone();
+          child.material.side = THREE.DoubleSide;
+
+          var edges = new THREE.LineSegments(
+            new THREE.EdgesGeometry(child.geometry, 20),
+            new THREE.LineBasicMaterial({ color: 0x3a3a3a })
+          );
+          child.add(edges);
+
+          var savedState = (saved[child.name] && typeof saved[child.name].state === 'number') ? saved[child.name].state : 0;
+          meshStates[child.name] = { mesh: child, state: savedState, label: name, category: category };
+        }
+      });
+
+      buildTypeLabels();
+      document.getElementById('loading').style.display = 'none';
+      applyCategoryVisuals();
+      animate();
+
+      fb.onValue(fb.ref(fb.db, 'estados'), function(snap) {
+        var data = snap.val() || {};
+        var changed = false;
+        Object.keys(data).forEach(function(k) {
+          if (meshStates[k] && !dirtyKeys[k] && typeof data[k].state === 'number' && data[k].state !== meshStates[k].state) {
+            meshStates[k].state = data[k].state;
+            changed = true;
+          }
+        });
+        if (changed) applyCategoryVisuals();
+      });
+    }, undefined, function(err) {
+      console.error('Error completo cargando chute.glb:', err);
+      var msg = (err && err.message) ? err.message : (err && err.target && err.target.status ? ('HTTP ' + err.target.status) : JSON.stringify(err));
+      document.getElementById('loading').textContent = 'Error cargando el modelo: ' + msg;
+    });
+  }).catch(function(err) {
+    document.getElementById('loading').textContent = 'Error conectando a Firebase: ' + err.message;
+  });
+
+  renderer.domElement.addEventListener('click', function(e) {
+    var rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    var activeMeshes = Object.keys(meshStates)
+      .filter(function(k) { return meshStates[k].category === activeCategory; })
+      .map(function(k) { return meshStates[k].mesh; });
+    var intersects = raycaster.intersectObjects(activeMeshes, false);
+    if (intersects.length > 0) {
+      var picked = intersects[0].object;
+      var entry = meshStates[picked.name];
+      var cat = CATEGORIES[entry.category];
+      entry.state = (entry.state + 1) % cat.states.length;
+      picked.material.color.setHex(cat.states[entry.state].color);
+      dirtyKeys[picked.name] = true;
+      renderCounts();
+      updateSaveButton();
+
+      var info = document.getElementById('selected-info');
+      info.style.display = 'block';
+      document.getElementById('sel-name').textContent = entry.label;
+      document.getElementById('sel-state').textContent = cat.states[entry.state].name;
+    }
+  });
+
+  function updateSaveButton() {
+    var n = Object.keys(dirtyKeys).length;
+    var btn = document.getElementById('btn-save');
+    btn.textContent = n > 0 ? ('Guardar cambios (' + n + ')') : 'Guardar cambios';
+    btn.disabled = (n === 0);
+  }
+  updateSaveButton();
+
+  document.getElementById('btn-save').addEventListener('click', function() {
+    var keys = Object.keys(dirtyKeys);
+    if (keys.length === 0) return;
+    var turno = document.getElementById('turno-input').value || 'Sin identificar';
+    localStorage.setItem('chute_turno', turno);
+    var payload = {};
+    keys.forEach(function(k) {
+      var e = meshStates[k];
+      payload[k] = { state: e.state, category: e.category, turno: turno, ts: Date.now() };
+    });
+    var statusEl = document.getElementById('save-status');
+    statusEl.textContent = 'Guardando...';
+    fb.update(fb.ref(fb.db, 'estados'), payload).then(function() {
+      dirtyKeys = {};
+      updateSaveButton();
+      statusEl.textContent = 'Guardado ' + new Date().toLocaleTimeString();
+    }).catch(function(err) {
+      statusEl.textContent = 'Error al guardar: ' + err.message;
+    });
+  });
+
+  var savedTurno = localStorage.getItem('chute_turno');
+  if (savedTurno) document.getElementById('turno-input').value = savedTurno;
+
+  var clock = new THREE.Clock();
+  function animate() {
+    requestAnimationFrame(animate);
+    updateTypeLabelPositions();
+    updateFlowMarkers(clock.getElapsedTime());
+    renderer.render(scene, camera);
+  }
+
+  window.addEventListener('resize', function() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  document.getElementById('btn-reset').addEventListener('click', function() {
+    spherical.theta = defaultSpherical.theta;
+    spherical.phi = defaultSpherical.phi;
+    spherical.radius = defaultSpherical.radius;
+    updateCameraFromSpherical();
+  });
+}
+</script>
+</body>
+</html>
