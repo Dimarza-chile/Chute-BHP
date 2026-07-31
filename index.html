@@ -5,7 +5,7 @@
 <title>Chute CV-201 - Inspeccion</title>
 <style>
   html, body { margin:0; padding:0; height:100%; overflow:hidden; font-family: -apple-system, Arial, sans-serif; background:#f1efe8; }
-  #canvas-container { width:100%; height:100%; }
+  #canvas-container { width:100%; height:100%; touch-action:none; }
   #ui {
     position:fixed; top:12px; left:12px; z-index:10;
     background:rgba(255,255,255,0.94); border-radius:10px; padding:12px 16px;
@@ -60,10 +60,13 @@
   </div>
   <div id="legend"></div>
   <div id="counts"></div>
-  <label id="turno-label">Supervisor / turno</label>
-  <input id="turno-input" type="text" placeholder="Ej: Juan Perez - Turno A">
+  <label id="turno-label">Turno</label>
+  <select id="turno-input"></select>
+  <label id="gap-label" style="font-size:11px; color:#888; margin-top:8px; display:block;">G.A.P. placa guia - correa (opcional)</label>
+  <input id="gap-input" type="text" placeholder='Ej: 3 mm o 1/8"' style="width:100%; padding:6px; font-size:12px; border-radius:6px; border:1px solid #ccc; box-sizing:border-box;">
   <button id="btn-save">Guardar cambios</button>
   <div id="save-status"></div>
+  <button id="btn-pdf" style="margin-top:8px; width:100%; padding:8px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:12px;">Exportar informe PDF</button>
   <button id="btn-reset">Restablecer vista</button>
 </div>
 <div id="selected-info">
@@ -93,6 +96,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script>
 window.addEventListener('DOMContentLoaded', function () {
   var waitForFirebase = setInterval(function () {
@@ -191,6 +195,45 @@ function startApp() {
     spherical.radius = Math.max(minRadius, Math.min(maxRadius, spherical.radius));
     updateCameraFromSpherical();
   }, { passive: false });
+
+  // --- Soporte tactil (moviles/tablet): un dedo rota, dos dedos hacen zoom ---
+  var touchPrevDist = null;
+  function touchDist(t0, t1) {
+    var dx = t0.clientX - t1.clientX, dy = t0.clientY - t1.clientY;
+    return Math.sqrt(dx*dx + dy*dy);
+  }
+  renderer.domElement.addEventListener('touchstart', function(e) {
+    if (e.touches.length === 1) {
+      isDragging = true;
+      prevX = e.touches[0].clientX;
+      prevY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+      isDragging = false;
+      touchPrevDist = touchDist(e.touches[0], e.touches[1]);
+    }
+  }, { passive: true });
+  renderer.domElement.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    if (e.touches.length === 1 && isDragging) {
+      var dx = e.touches[0].clientX - prevX, dy = e.touches[0].clientY - prevY;
+      prevX = e.touches[0].clientX; prevY = e.touches[0].clientY;
+      spherical.theta -= dx * 0.008;
+      spherical.phi -= dy * 0.008;
+      spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+      updateCameraFromSpherical();
+    } else if (e.touches.length === 2 && touchPrevDist !== null) {
+      var d = touchDist(e.touches[0], e.touches[1]);
+      var scale = touchPrevDist / d;
+      touchPrevDist = d;
+      spherical.radius *= scale;
+      spherical.radius = Math.max(minRadius, Math.min(maxRadius, spherical.radius));
+      updateCameraFromSpherical();
+    }
+  }, { passive: false });
+  renderer.domElement.addEventListener('touchend', function(e) {
+    if (e.touches.length === 0) { isDragging = false; touchPrevDist = null; }
+    else if (e.touches.length === 1) { touchPrevDist = null; isDragging = true; prevX = e.touches[0].clientX; prevY = e.touches[0].clientY; }
+  }, { passive: true });
 
   var loader = new THREE.GLTFLoader();
   var raycaster = new THREE.Raycaster();
@@ -487,12 +530,12 @@ function startApp() {
   document.getElementById('btn-save').addEventListener('click', function() {
     var keys = Object.keys(dirtyKeys);
     if (keys.length === 0) return;
-    var turno = document.getElementById('turno-input').value || 'Sin identificar';
-    localStorage.setItem('chute_turno', turno);
+    var turnoIdx = parseInt(turnoSelect.value, 10);
+    var turno = turnoLabels[turnoIdx];
     var payload = {};
     keys.forEach(function(k) {
       var e = meshStates[k];
-      payload[k] = { state: e.state, category: e.category, turno: turno, ts: Date.now() };
+      payload[k] = { state: e.state, category: e.category, turno: turno, turnoIdx: turnoIdx, ts: Date.now() };
     });
     var statusEl = document.getElementById('save-status');
     statusEl.textContent = 'Guardando...';
@@ -505,8 +548,25 @@ function startApp() {
     });
   });
 
-  var savedTurno = localStorage.getItem('chute_turno');
-  if (savedTurno) document.getElementById('turno-input').value = savedTurno;
+  var urlParams = new URLSearchParams(window.location.search);
+  var turnoLabels = [];
+  try {
+    var turnosParam = urlParams.get('turnos');
+    if (turnosParam) turnoLabels = JSON.parse(decodeURIComponent(turnosParam));
+  } catch (e) { turnoLabels = []; }
+  if (turnoLabels.length === 0) turnoLabels = ['Sin turno definido'];
+  var turnoActualIdx = parseInt(urlParams.get('turnoActual'), 10);
+  if (isNaN(turnoActualIdx) || turnoActualIdx < 0 || turnoActualIdx >= turnoLabels.length) turnoActualIdx = turnoLabels.length - 1;
+
+  var turnoSelect = document.getElementById('turno-input');
+  turnoSelect.innerHTML = turnoLabels.map(function(lbl, i) {
+    return '<option value="' + i + '"' + (i === turnoActualIdx ? ' selected' : '') + '>' + lbl + '</option>';
+  }).join('');
+
+  var gapInput = document.getElementById('gap-input');
+  var savedGap = localStorage.getItem('chute_gap');
+  if (savedGap) gapInput.value = savedGap;
+  gapInput.addEventListener('change', function() { localStorage.setItem('chute_gap', gapInput.value); });
 
   var clock = new THREE.Clock();
   function animate() {
@@ -521,6 +581,79 @@ function startApp() {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
+
+  document.getElementById('btn-pdf').addEventListener('click', function() {
+    generatePdfReport();
+  });
+
+  function generatePdfReport() {
+    var jsPDFCtor = window.jspdf ? window.jspdf.jsPDF : null;
+    if (!jsPDFCtor) { alert('No se pudo cargar el generador de PDF. Revisa tu conexion a internet.'); return; }
+    var doc = new jsPDFCtor({ unit: 'mm', format: 'a4' });
+    var y = 18;
+    var pageH = 280;
+
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text('Informe de inspeccion - Chute CV-201', 14, y);
+    y += 7;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    var turnoIdx = parseInt(turnoSelect.value, 10);
+    doc.text('Turno: ' + turnoLabels[turnoIdx], 14, y); y += 5;
+    doc.text('Fecha de generacion: ' + new Date().toLocaleString(), 14, y); y += 5;
+    var gapVal = gapInput.value || 'No especificado';
+    doc.text('G.A.P. placa guia - correa: ' + gapVal, 14, y); y += 9;
+
+    function sectionHeader(title) {
+      if (y > pageH) { doc.addPage(); y = 18; }
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'bold');
+      doc.text(title, 14, y); y += 6;
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'normal');
+    }
+
+    function summaryLine(cat) {
+      var counts = {};
+      cat.states.forEach(function(s) { counts[s.name] = 0; });
+      Object.keys(meshStates).forEach(function(k) {
+        var e = meshStates[k];
+        if (e.category === (cat === CATEGORIES.placas ? 'placas' : 'estructura')) {
+          counts[cat.states[e.state].name] = (counts[cat.states[e.state].name] || 0) + 1;
+        }
+      });
+      cat.states.forEach(function(s) {
+        if (y > pageH) { doc.addPage(); y = 18; }
+        doc.text('  ' + s.name + ': ' + counts[s.name], 16, y); y += 4.5;
+      });
+      y += 2;
+    }
+
+    sectionHeader('Resumen - Placas guia');
+    summaryLine(CATEGORIES.placas);
+    sectionHeader('Resumen - Estructura');
+    summaryLine(CATEGORIES.estructura);
+
+    function detailList(catKey, catDef) {
+      var items = Object.keys(meshStates)
+        .map(function(k) { return meshStates[k]; })
+        .filter(function(e) { return e.category === catKey && e.state !== 0; });
+      if (items.length === 0) return;
+      sectionHeader('Detalle de cambios - ' + catDef.label);
+      items.forEach(function(e) {
+        if (y > pageH) { doc.addPage(); y = 18; }
+        doc.text('  ' + e.label + '  ->  ' + catDef.states[e.state].name, 16, y);
+        y += 4.5;
+      });
+      y += 3;
+    }
+
+    detailList('placas', CATEGORIES.placas);
+    detailList('estructura', CATEGORIES.estructura);
+
+    doc.save('informe_chute_cv201_' + Date.now() + '.pdf');
+  }
 
   document.getElementById('btn-reset').addEventListener('click', function() {
     spherical.theta = defaultSpherical.theta;
