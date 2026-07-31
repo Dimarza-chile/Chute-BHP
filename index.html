@@ -41,12 +41,9 @@
   #turno-label { font-size:11px; color:#888; margin-top:8px; display:block; }
   .type-label {
     position:absolute; z-index:15; pointer-events:none;
-    background:rgba(44,44,42,0.9); color:#fff; font-size:11px; padding:4px 8px;
-    border-radius:5px; white-space:nowrap; transform:translate(-50%, -130%);
-  }
-  .type-label:after {
-    content:''; position:absolute; left:50%; top:100%; transform:translateX(-50%);
-    border:5px solid transparent; border-top-color:rgba(44,44,42,0.9);
+    background:rgba(255,255,255,0.95); color:#2C2C2A; font-size:11px; font-weight:600; padding:4px 8px;
+    border-radius:5px; white-space:nowrap; transform:translate(-50%, -50%);
+    border:1px solid #2C2C2A; box-shadow:0 1px 4px rgba(0,0,0,0.15);
   }
 </style>
 </head>
@@ -300,29 +297,56 @@ function startApp() {
   document.getElementById('btn-cat-placas').addEventListener('click', function() { setCategory('placas'); });
 
   // --- Etiquetas de tipo (una por tipo, con cantidad) ---
+  var typeLabelSvg = null;
+
   function buildTypeLabels() {
     var seen = {};
     Object.keys(meshStates).forEach(function(k) {
       var entry = meshStates[k];
-      var m = entry.label.match(/^(Pg|Pm)-(izq|der|sup|ant)?-?([A-Z]{2}-\d{2})/);
-      var typeKey = m ? (m[1] + '-' + m[3]) : entry.label;
-      if (!seen[typeKey]) seen[typeKey] = { count: 0, sample: entry, code: m ? m[3] : entry.label };
+      var m = entry.label.match(/^(Pg)-(izq|der)-(.+)-(\d+)$/);
+      var typeKey, code;
+      if (m) { typeKey = m[1] + '-' + m[2] + '-' + m[3]; code = m[3] + (m[2] === 'izq' ? ' izq.' : ' der.'); }
+      else { typeKey = entry.label; code = entry.label; }
+      if (!seen[typeKey]) seen[typeKey] = { count: 0, sample: entry, code: code };
       seen[typeKey].count++;
     });
+
+    typeLabelSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    typeLabelSvg.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; z-index:14; pointer-events:none;';
+    document.body.appendChild(typeLabelSvg);
+
     typeLabelMeshes = [];
+    var offsets = [ [70,-70], [-70,-70], [70,70], [-70,70], [95,-30], [-95,-30], [95,30], [-95,30] ];
+    var i = 0;
     Object.keys(seen).forEach(function(tk) {
       var info = seen[tk];
       var div = document.createElement('div');
       div.className = 'type-label';
       div.textContent = info.code + ' (x' + info.count + ')';
       document.body.appendChild(div);
-      typeLabelMeshes.push({ mesh: info.sample.mesh, category: info.sample.category, el: div });
+      var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('stroke', '#2C2C2A');
+      line.setAttribute('stroke-width', '1.3');
+      typeLabelSvg.appendChild(line);
+      var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('r', '3');
+      dot.setAttribute('fill', '#2C2C2A');
+      typeLabelSvg.appendChild(dot);
+      typeLabelMeshes.push({
+        mesh: info.sample.mesh, category: info.sample.category,
+        el: div, line: line, dot: dot,
+        offset: offsets[i % offsets.length]
+      });
+      i++;
     });
   }
 
   function updateTypeLabelsVisibility() {
     typeLabelMeshes.forEach(function(t) {
-      t.el.style.display = (t.category === activeCategory) ? 'block' : 'none';
+      var visible = (t.category === activeCategory);
+      t.el.style.display = visible ? 'block' : 'none';
+      t.line.style.display = visible ? 'block' : 'none';
+      t.dot.style.display = visible ? 'block' : 'none';
     });
   }
 
@@ -333,12 +357,19 @@ function startApp() {
       var pos = new THREE.Vector3();
       t.mesh.getWorldPosition(pos);
       pos.project(camera);
+      if (pos.z > 1) {
+        t.el.style.display = 'none'; t.line.style.display = 'none'; t.dot.style.display = 'none';
+        return;
+      }
       var x = (pos.x * 0.5 + 0.5) * w;
       var y = (-pos.y * 0.5 + 0.5) * h;
-      if (pos.z > 1) { t.el.style.display = 'none'; return; }
-      t.el.style.display = 'block';
-      t.el.style.left = x + 'px';
-      t.el.style.top = y + 'px';
+      var lx = x + t.offset[0];
+      var ly = y + t.offset[1];
+      t.el.style.left = lx + 'px';
+      t.el.style.top = ly + 'px';
+      t.line.setAttribute('x1', x); t.line.setAttribute('y1', y);
+      t.line.setAttribute('x2', lx); t.line.setAttribute('y2', ly);
+      t.dot.setAttribute('cx', x); t.dot.setAttribute('cy', y);
     });
   }
 
@@ -590,7 +621,22 @@ function startApp() {
   });
 
   // --- Captura de vistas del modelo para el informe ---
-  function snapshotView(theta, phi, radiusMul, highlightFn, clipPlanes) {
+  function captureAtAspect(aspect, renderFn) {
+    var targetW = 1400;
+    var targetH = Math.round(targetW / aspect);
+    var oldW = renderer.domElement.width, oldH = renderer.domElement.height;
+    var oldCamAspect = camera.aspect;
+    renderer.setSize(targetW, targetH, false);
+    camera.aspect = aspect;
+    camera.updateProjectionMatrix();
+    var dataUrl = renderFn();
+    renderer.setSize(oldW, oldH, false);
+    camera.aspect = oldCamAspect;
+    camera.updateProjectionMatrix();
+    return { dataUrl: dataUrl, aspect: aspect };
+  }
+
+  function snapshotView(theta, phi, radiusMul, highlightFn, clipPlanes, aspect) {
     var savedOpacity = {}, savedTransparent = {};
     Object.keys(meshStates).forEach(function(k) {
       var e = meshStates[k];
@@ -605,10 +651,14 @@ function startApp() {
     spherical.phi = phi;
     spherical.radius = defaultSpherical.radius * radiusMul;
     updateCameraFromSpherical();
-    renderer.clippingPlanes = clipPlanes || [];
-    renderer.render(scene, camera);
-    var dataUrl = renderer.domElement.toDataURL('image/png');
-    renderer.clippingPlanes = [];
+
+    var result = captureAtAspect(aspect || 1.6, function() {
+      renderer.clippingPlanes = clipPlanes || [];
+      renderer.render(scene, camera);
+      var url = renderer.domElement.toDataURL('image/png');
+      renderer.clippingPlanes = [];
+      return url;
+    });
 
     Object.keys(meshStates).forEach(function(k) {
       var e = meshStates[k];
@@ -618,7 +668,7 @@ function startApp() {
     spherical.theta = savedTheta; spherical.phi = savedPhi; spherical.radius = savedRadius;
     updateCameraFromSpherical();
     renderer.render(scene, camera);
-    return dataUrl;
+    return result;
   }
 
   function isIzq(e) { return e.label.indexOf('izq') !== -1; }
@@ -628,7 +678,7 @@ function startApp() {
   // --- Vista ortogonal "de frente" de una pared, cortando el modelo por el centro ---
   // sideSign: +1 = lado derecho segun el sentido de carga, -1 = lado izquierdo
   function snapshotWallElevation(category, sideSign) {
-    if (!modelBox) return null;
+    if (!modelBox) return { dataUrl: null, aspect: 2 };
     var up = new THREE.Vector3(0, 1, 0);
     var rightVec = new THREE.Vector3().crossVectors(flowDir, up).normalize();
     var center = modelBox.getCenter(new THREE.Vector3());
@@ -640,6 +690,7 @@ function startApp() {
     var lengthAlongFlow = Math.abs(flowDir.x) > 0.5 ? size.x : size.z;
     var halfW = lengthAlongFlow * 0.55;
     var halfH = size.y * 1.3;
+    var aspect = (halfW * 2) / (halfH * 2);
     var orthoCam = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.01, 100000);
 
     var camDist = (Math.abs(flowDir.x) > 0.5 ? size.z : size.x) * 3 + 2;
@@ -659,10 +710,14 @@ function startApp() {
       e.mesh.material.opacity = show ? 1 : 0.05;
     });
 
+    var oldW = renderer.domElement.width, oldH = renderer.domElement.height;
+    var targetW = 1400, targetH = Math.round(targetW / aspect);
+    renderer.setSize(targetW, targetH, false);
     renderer.clippingPlanes = [clipPlane];
     renderer.render(scene, orthoCam);
     var dataUrl = renderer.domElement.toDataURL('image/png');
     renderer.clippingPlanes = [];
+    renderer.setSize(oldW, oldH, false);
 
     Object.keys(meshStates).forEach(function(k) {
       var e = meshStates[k];
@@ -670,7 +725,7 @@ function startApp() {
       e.mesh.material.transparent = savedTransparent[k];
     });
     renderer.render(scene, camera);
-    return dataUrl;
+    return { dataUrl: dataUrl, aspect: aspect };
   }
 
   function generatePdfReport() {
@@ -684,54 +739,49 @@ function startApp() {
     var turnoTxt = turnoLabels[turnoIdx];
     var gapVal = gapInput.value || 'No especificado';
 
-    // --- Conteos ---
-    var countsPlacas = {}, countsEstructura = {};
-    CATEGORIES.placas.states.forEach(function(s) { countsPlacas[s.name] = 0; });
-    CATEGORIES.estructura.states.forEach(function(s) { countsEstructura[s.name] = 0; });
-    Object.keys(meshStates).forEach(function(k) {
-      var e = meshStates[k];
-      var cat = CATEGORIES[e.category];
-      var name = cat.states[e.state].name;
-      if (e.category === 'placas') countsPlacas[name]++; else countsEstructura[name]++;
-    });
+    // --- Colores del tema (mismos que la app) ---
+    var C_DARK = [44, 44, 42];
+    var C_STEEL = [139, 149, 161];
+    var C_GREEN = [99, 153, 34];
+    var C_RED = [226, 75, 74];
+    var C_YELLOW = [250, 199, 117];
+    var C_LINE = [225, 223, 216];
+    var C_BG = [246, 245, 241];
 
-    // --- Determinar el eje real que separa izquierda de derecha, usando la geometria real ---
-    var sumZIzq = 0, nZIzq = 0, sumZDer = 0, nZDer = 0;
-    Object.keys(meshStates).forEach(function(k) {
-      var e = meshStates[k];
-      var pos = new THREE.Vector3();
-      e.mesh.getWorldPosition(pos);
-      if (isIzq(e)) { sumZIzq += pos.z; nZIzq++; }
-      if (isDer(e)) { sumZDer += pos.z; nZDer++; }
-    });
-    var avgZIzq = nZIzq ? sumZIzq / nZIzq : 0;
-    var avgZDer = nZDer ? sumZDer / nZDer : 1;
+    function countsFor(category, sideFilterFn) {
+      var counts = {};
+      CATEGORIES[category].states.forEach(function(s) { counts[s.name] = 0; });
+      Object.keys(meshStates).forEach(function(k) {
+        var e = meshStates[k];
+        if (e.category === category && sideFilterFn(e)) counts[CATEGORIES[category].states[e.state].name]++;
+      });
+      return counts;
+    }
+
+    var countsPlacas = countsFor('placas', function() { return true; });
+    var countsEstructura = countsFor('estructura', function() { return true; });
+    var countsPlacasIzq = countsFor('placas', isIzq);
+    var countsPlacasDer = countsFor('placas', isDer);
+    var countsEstructIzq = countsFor('estructura', isIzq);
+    var countsEstructDer = countsFor('estructura', isDer);
+    var countsEstructCentral = countsFor('estructura', isCentral);
+
+    // --- Franja central de estructura (clip 3D, isometrico) ---
     var centerZ = modelBox ? (modelBox.min.z + modelBox.max.z) / 2 : 0;
-    var izqIsLowerZ = avgZIzq < avgZDer;
-
-    // Plano que deja visible solo el lado "izq" (corta el lado "der")
-    var clipKeepIzq = izqIsLowerZ
-      ? [new THREE.Plane(new THREE.Vector3(0,0,-1), centerZ)]
-      : [new THREE.Plane(new THREE.Vector3(0,0,1), -centerZ)];
-    // Plano que deja visible solo el lado "der" (corta el lado "izq")
-    var clipKeepDer = izqIsLowerZ
-      ? [new THREE.Plane(new THREE.Vector3(0,0,1), -centerZ)]
-      : [new THREE.Plane(new THREE.Vector3(0,0,-1), centerZ)];
-    // Franja central: corta ambos extremos, deja visible solo la banda del medio
     var band = modelBox ? (modelBox.max.z - modelBox.min.z) * 0.18 : 0.2;
     var clipKeepCentral = [
       new THREE.Plane(new THREE.Vector3(0,0,-1), centerZ + band),
       new THREE.Plane(new THREE.Vector3(0,0,1), -(centerZ - band))
     ];
 
-    // --- Capturas: placas izq/der y estructura izq/der/central (solo piezas con cambio) ---
+    // --- Capturas (todas devuelven {dataUrl, aspect}, sin distorsion) ---
     var imgPlacasIzq = snapshotWallElevation('placas', -1);
     var imgPlacasDer = snapshotWallElevation('placas', 1);
     var imgEstructIzq = snapshotWallElevation('estructura', -1);
     var imgEstructDer = snapshotWallElevation('estructura', 1);
-    var imgEstructCentral = snapshotView(defaultSpherical.theta, Math.PI/2.6, 1.1, function(e) { return e.category==='estructura' && e.state!==0 && isCentral(e); }, clipKeepCentral);
+    var imgEstructCentral = snapshotView(defaultSpherical.theta, Math.PI/2.6, 1.1, function(e) { return e.category==='estructura' && e.state!==0 && isCentral(e); }, clipKeepCentral, 1.5);
 
-    // --- Conclusion legible, generada a partir de los conteos ---
+    // --- Conclusion legible ---
     var totalPlacasCambio = countsPlacas['Cambio'] || 0;
     var totalPlacasVolteo = countsPlacas['Volteo'] || 0;
     var totalPlacasProx = countsPlacas['Proxima mantencion'] || 0;
@@ -747,113 +797,181 @@ function startApp() {
       'Se recomienda dar seguimiento a los elementos marcados como proxima mantencion en la siguiente parada.';
 
     var doc = new jsPDFCtor({ unit: 'mm', format: 'a4' });
-    var y = 20;
-    var pageH = 275;
-    var pageW = 210;
+    var pageW = 210, pageH = 297;
+    var margin = 14;
+    var contentW = pageW - margin * 2;
+    var y = 0;
+    var pageNum = 1;
 
-    // --- Titulo ---
-    doc.setFontSize(17);
-    doc.setFont(undefined, 'bold');
-    doc.text('Informe de inspeccion - Chute de alimentacion CV-201', 14, y);
-    y += 6;
-    doc.setDrawColor(200);
-    doc.line(14, y, pageW - 14, y);
-    y += 8;
+    function newPage() {
+      doc.addPage();
+      pageNum++;
+      drawFooter();
+      y = 24;
+    }
 
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
-    doc.text('Turno: ' + turnoTxt, 14, y); y += 5;
-    doc.text('Fecha de generacion: ' + new Date().toLocaleString(), 14, y); y += 5;
-    doc.text('G.A.P. placa guia - correa: ' + gapVal, 14, y); y += 9;
+    function drawFooter() {
+      doc.setFontSize(7.5);
+      doc.setTextColor(150, 150, 150);
+      doc.text('Informe generado por plataforma de inspeccion Dimarza - BHP Escondida', margin, pageH - 8);
+      doc.text('Pagina ' + pageNum, pageW - margin, pageH - 8, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
+    }
 
-    function sectionHeader(title) {
-      if (y > pageH) { doc.addPage(); y = 20; }
-      doc.setFontSize(12.5);
+    function ensureSpace(h) {
+      if (y + h > pageH - 16) newPage();
+    }
+
+    function sectionHeader(title, color) {
+      ensureSpace(10);
+      doc.setFillColor.apply(doc, color || C_DARK);
+      doc.rect(margin, y, 3, 5.5, 'F');
+      doc.setFontSize(12);
       doc.setFont(undefined, 'bold');
-      doc.text(title, 14, y); y += 6;
+      doc.setTextColor.apply(doc, C_DARK);
+      doc.text(title, margin + 6, y + 4.3);
+      y += 9;
       doc.setFontSize(9.5);
       doc.setFont(undefined, 'normal');
     }
 
-    // --- Conclusion ---
+    // ================= PORTADA =================
+    doc.setFillColor.apply(doc, C_DARK);
+    doc.rect(0, 0, pageW, 48, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(19);
+    doc.setFont(undefined, 'bold');
+    doc.text('Informe de inspeccion', margin, 22);
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'normal');
+    doc.text('Chute de alimentacion CV-201', margin, 31);
+    doc.setFontSize(9.5);
+    doc.text('Mineria Escondida - BHP  ·  Contratista Dimarza', margin, 39);
+    doc.setTextColor(0, 0, 0);
+    y = 58;
+
+    doc.setFillColor.apply(doc, C_BG);
+    doc.roundedRect(margin, y, contentW, 26, 2, 2, 'F');
+    doc.setFontSize(9.5);
+    doc.setFont(undefined, 'bold');
+    doc.text('Turno', margin + 6, y + 8);
+    doc.text('Fecha', margin + 6, y + 16);
+    doc.text('G.A.P. placa guia - correa', margin + 90, y + 8);
+    doc.setFont(undefined, 'normal');
+    doc.text(turnoTxt, margin + 40, y + 8);
+    doc.text(new Date().toLocaleString(), margin + 40, y + 16);
+    doc.text(gapVal, margin + 150, y + 8);
+    y += 36;
+
     sectionHeader('Resumen ejecutivo');
-    var splitConclusion = doc.splitTextToSize(conclusion, pageW - 28);
-    doc.text(splitConclusion, 14, y);
-    y += splitConclusion.length * 4.5 + 6;
+    var splitConclusion = doc.splitTextToSize(conclusion, contentW);
+    doc.text(splitConclusion, margin, y);
+    y += splitConclusion.length * 4.6 + 8;
 
-    // --- Conteos ---
-    sectionHeader('Conteo - Placas guia');
-    CATEGORIES.placas.states.forEach(function(s) {
-      if (y > pageH) { doc.addPage(); y = 20; }
-      doc.text('  ' + s.name + ': ' + countsPlacas[s.name], 16, y); y += 4.5;
-    });
-    y += 4;
-
-    sectionHeader('Conteo - Estructura');
-    CATEGORIES.estructura.states.forEach(function(s) {
-      if (y > pageH) { doc.addPage(); y = 20; }
-      doc.text('  ' + s.name + ': ' + countsEstructura[s.name], 16, y); y += 4.5;
-    });
-    y += 6;
-
-    // --- Fotos ---
-    function addPhotoPair(title1, img1, title2, img2) {
-      if (y > pageH - 70) { doc.addPage(); y = 20; }
-      sectionHeader(title1 + '  /  ' + title2);
-      var w = (pageW - 14 - 14 - 6) / 2;
-      var h = w * 0.62;
-      doc.setFontSize(8.5);
-      doc.text(title1, 14, y);
-      doc.text(title2, 14 + w + 6, y);
-      y += 3;
-      doc.addImage(img1, 'PNG', 14, y, w, h);
-      doc.addImage(img2, 'PNG', 14 + w + 6, y, w, h);
-      y += h + 8;
+    // --- Tarjetas de conteo (estilo KPI) ---
+    function statCards(states, counts, startY) {
+      var n = states.length;
+      var gap = 4;
+      var cardW = (contentW - gap * (n - 1)) / n;
+      var cardH = 20;
+      states.forEach(function(s, i) {
+        var cx = margin + i * (cardW + gap);
+        var color = s.name === 'Cambio' ? C_GREEN : s.name === 'Volteo' ? C_RED :
+                    (s.name.indexOf('Proxima') === 0 || s.name.indexOf('Proximo') === 0) ? C_YELLOW :
+                    C_STEEL;
+        doc.setFillColor.apply(doc, C_BG);
+        doc.roundedRect(cx, startY, cardW, cardH, 1.5, 1.5, 'F');
+        doc.setFillColor.apply(doc, color);
+        doc.roundedRect(cx, startY, 3, cardH, 1.5, 1.5, 'F');
+        doc.setFontSize(13);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor.apply(doc, C_DARK);
+        doc.text(String(counts[s.name] || 0), cx + 8, startY + 10);
+        doc.setFontSize(7);
+        doc.setFont(undefined, 'normal');
+        var lbl = doc.splitTextToSize(s.name, cardW - 8);
+        doc.text(lbl, cx + 8, startY + 15);
+      });
+      doc.setTextColor(0, 0, 0);
+      return startY + cardH + 10;
     }
 
-    function addPhotoSingle(title, img) {
-      if (y > pageH - 70) { doc.addPage(); y = 20; }
-      doc.setFontSize(8.5);
+    ensureSpace(40);
+    sectionHeader('Conteo general - Placas guia');
+    y = statCards(CATEGORIES.placas.states, countsPlacas, y);
+
+    ensureSpace(40);
+    sectionHeader('Conteo general - Estructura');
+    y = statCards(CATEGORIES.estructura.states, countsEstructura, y);
+
+    // ================= FOTOS: PLACAS GUIA =================
+    function photoWithStats(title, img, states, counts) {
+      var maxW = contentW;
+      var maxH = 105;
+      var h = maxW / img.aspect;
+      var w = maxW;
+      if (h > maxH) { h = maxH; w = h * img.aspect; }
+      ensureSpace(h + 26);
+      doc.setFontSize(10.5);
       doc.setFont(undefined, 'bold');
-      doc.text(title, 14, y);
+      doc.setTextColor.apply(doc, C_DARK);
+      doc.text(title, margin, y);
+      y += 4;
+      if (img.dataUrl) {
+        doc.setDrawColor.apply(doc, C_LINE);
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(margin, y, w, h, 1, 1, 'FD');
+        doc.addImage(img.dataUrl, 'PNG', margin, y, w, h);
+      }
+      y += h + 4;
+      var line = states.map(function(s) { return s.name + ': ' + (counts[s.name] || 0); }).join('    |    ');
+      doc.setFontSize(8.5);
       doc.setFont(undefined, 'normal');
-      y += 3;
-      var w = pageW - 28;
-      var h = w * 0.55;
-      doc.addImage(img, 'PNG', 14, y, w, h);
-      y += h + 8;
+      doc.setTextColor(90, 90, 90);
+      doc.text(line, margin, y);
+      doc.setTextColor(0, 0, 0);
+      y += 10;
     }
 
-    doc.addPage(); y = 20;
-    sectionHeader('Fotografias - Placas guia cambiadas (corte central, segun sentido de carga)');
-    addPhotoPair('Pared izquierda', imgPlacasIzq, 'Pared derecha', imgPlacasDer);
+    newPage();
+    sectionHeader('Placas guia cambiadas (vista de corte, segun sentido de carga)');
+    photoWithStats('Pared izquierda', imgPlacasIzq, CATEGORIES.placas.states, countsPlacasIzq);
+    photoWithStats('Pared derecha', imgPlacasDer, CATEGORIES.placas.states, countsPlacasDer);
 
-    doc.addPage(); y = 20;
-    sectionHeader('Fotografias - Estructura cambiada (corte central, segun sentido de carga)');
-    addPhotoPair('Pared izquierda', imgEstructIzq, 'Pared derecha', imgEstructDer);
-    addPhotoSingle('Zona central', imgEstructCentral);
+    // ================= FOTOS: ESTRUCTURA =================
+    newPage();
+    sectionHeader('Estructura cambiada (vista de corte, segun sentido de carga)');
+    photoWithStats('Pared izquierda', imgEstructIzq, CATEGORIES.estructura.states, countsEstructIzq);
+    photoWithStats('Pared derecha', imgEstructDer, CATEGORIES.estructura.states, countsEstructDer);
+    photoWithStats('Zona central (vista isometrica)', imgEstructCentral, CATEGORIES.estructura.states, countsEstructCentral);
 
-    // --- Detalle ---
+    // ================= DETALLE =================
     function detailList(catKey, catDef) {
       var items = Object.keys(meshStates)
         .map(function(k) { return meshStates[k]; })
         .filter(function(e) { return e.category === catKey && e.state !== 0; });
       if (items.length === 0) return;
-      if (y > pageH - 20) { doc.addPage(); y = 20; }
+      ensureSpace(12);
       sectionHeader('Detalle de cambios - ' + catDef.label);
       items.forEach(function(e) {
-        if (y > pageH) { doc.addPage(); y = 20; }
-        doc.text('  ' + e.label + '  ->  ' + catDef.states[e.state].name, 16, y);
-        y += 4.5;
+        ensureSpace(5);
+        var color = catDef.states[e.state].name === 'Cambio' ? C_GREEN :
+                    catDef.states[e.state].name === 'Volteo' ? C_RED : C_YELLOW;
+        doc.setFillColor.apply(doc, color);
+        doc.circle(margin + 1.2, y - 1.3, 1.2, 'F');
+        doc.setFontSize(9);
+        doc.text(e.label + '   ->   ' + catDef.states[e.state].name, margin + 6, y);
+        y += 5;
       });
-      y += 3;
+      y += 4;
     }
 
-    doc.addPage(); y = 20;
+    newPage();
     sectionHeader('Detalle completo de cambios');
     detailList('placas', CATEGORIES.placas);
     detailList('estructura', CATEGORIES.estructura);
 
+    drawFooter();
     doc.save('informe_chute_cv201_' + Date.now() + '.pdf');
     statusEl.textContent = 'Informe generado.';
   }
