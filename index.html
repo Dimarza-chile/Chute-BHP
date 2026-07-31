@@ -151,7 +151,7 @@ function startApp() {
   var camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 50000);
   camera.position.set(4000, 3000, 4000);
 
-  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  var renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   container.appendChild(renderer.domElement);
 
@@ -217,8 +217,8 @@ function startApp() {
     if (e.touches.length === 1 && isDragging) {
       var dx = e.touches[0].clientX - prevX, dy = e.touches[0].clientY - prevY;
       prevX = e.touches[0].clientX; prevY = e.touches[0].clientY;
-      spherical.theta -= dx * 0.008;
-      spherical.phi -= dy * 0.008;
+      spherical.theta -= dx * 0.0025;
+      spherical.phi -= dy * 0.0025;
       spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
       updateCameraFromSpherical();
     } else if (e.touches.length === 2 && touchPrevDist !== null) {
@@ -586,73 +586,194 @@ function startApp() {
     generatePdfReport();
   });
 
+  // --- Captura de vistas del modelo para el informe ---
+  function snapshotView(theta, phi, radiusMul, highlightFn) {
+    var savedOpacity = {}, savedTransparent = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      savedOpacity[k] = e.mesh.material.opacity;
+      savedTransparent[k] = e.mesh.material.transparent;
+      var show = highlightFn(e);
+      e.mesh.material.transparent = true;
+      e.mesh.material.opacity = show ? 1 : 0.05;
+    });
+    var savedTheta = spherical.theta, savedPhi = spherical.phi, savedRadius = spherical.radius;
+    spherical.theta = theta;
+    spherical.phi = phi;
+    spherical.radius = defaultSpherical.radius * radiusMul;
+    updateCameraFromSpherical();
+    renderer.render(scene, camera);
+    var dataUrl = renderer.domElement.toDataURL('image/png');
+
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      e.mesh.material.opacity = savedOpacity[k];
+      e.mesh.material.transparent = savedTransparent[k];
+    });
+    spherical.theta = savedTheta; spherical.phi = savedPhi; spherical.radius = savedRadius;
+    updateCameraFromSpherical();
+    renderer.render(scene, camera);
+    return dataUrl;
+  }
+
+  function isIzq(e) { return e.label.indexOf('izq') !== -1; }
+  function isDer(e) { return e.label.indexOf('der') !== -1; }
+  function isCentral(e) { return e.label.indexOf('sup') !== -1 || e.label.indexOf('ant') !== -1; }
+
   function generatePdfReport() {
     var jsPDFCtor = window.jspdf ? window.jspdf.jsPDF : null;
     if (!jsPDFCtor) { alert('No se pudo cargar el generador de PDF. Revisa tu conexion a internet.'); return; }
-    var doc = new jsPDFCtor({ unit: 'mm', format: 'a4' });
-    var y = 18;
-    var pageH = 280;
 
-    doc.setFontSize(14);
+    var statusEl = document.getElementById('save-status');
+    statusEl.textContent = 'Generando informe, un momento...';
+
+    var turnoIdx = parseInt(turnoSelect.value, 10);
+    var turnoTxt = turnoLabels[turnoIdx];
+    var gapVal = gapInput.value || 'No especificado';
+
+    // --- Conteos ---
+    var countsPlacas = {}, countsEstructura = {};
+    CATEGORIES.placas.states.forEach(function(s) { countsPlacas[s.name] = 0; });
+    CATEGORIES.estructura.states.forEach(function(s) { countsEstructura[s.name] = 0; });
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      var cat = CATEGORIES[e.category];
+      var name = cat.states[e.state].name;
+      if (e.category === 'placas') countsPlacas[name]++; else countsEstructura[name]++;
+    });
+
+    // --- Capturas: placas izq/der y estructura izq/der/central (solo piezas con cambio) ---
+    var imgPlacasIzq = snapshotView(Math.PI/2, Math.PI/2.3, 0.75, function(e) { return e.category==='placas' && e.state!==0 && isIzq(e); });
+    var imgPlacasDer = snapshotView(-Math.PI/2, Math.PI/2.3, 0.75, function(e) { return e.category==='placas' && e.state!==0 && isDer(e); });
+    var imgEstructIzq = snapshotView(Math.PI/2, Math.PI/2.3, 0.85, function(e) { return e.category==='estructura' && e.state!==0 && isIzq(e); });
+    var imgEstructDer = snapshotView(-Math.PI/2, Math.PI/2.3, 0.85, function(e) { return e.category==='estructura' && e.state!==0 && isDer(e); });
+    var imgEstructCentral = snapshotView(defaultSpherical.theta, Math.PI/2.6, 1.1, function(e) { return e.category==='estructura' && e.state!==0 && isCentral(e); });
+
+    // --- Conclusion legible, generada a partir de los conteos ---
+    var totalPlacasCambio = countsPlacas['Cambio'] || 0;
+    var totalPlacasVolteo = countsPlacas['Volteo'] || 0;
+    var totalPlacasProx = countsPlacas['Proxima mantencion'] || 0;
+    var totalEstructCambio = countsEstructura['Cambio'] || 0;
+    var totalEstructProx = countsEstructura['Proximo a cambio'] || 0;
+    var totalCambiosGeneral = totalPlacasCambio + totalPlacasVolteo + totalEstructCambio;
+
+    var conclusion = 'Durante el turno ' + turnoTxt + ' se registraron ' + totalCambiosGeneral +
+      ' intervenciones en el chute de alimentacion CV-201. En placas guia se realizaron ' +
+      totalPlacasCambio + ' cambio(s) y ' + totalPlacasVolteo + ' volteo(s), quedando ' +
+      totalPlacasProx + ' placa(s) marcada(s) para proxima mantencion. En la estructura se registraron ' +
+      totalEstructCambio + ' cambio(s), con ' + totalEstructProx + ' elemento(s) marcado(s) para proximo cambio. ' +
+      'Se recomienda dar seguimiento a los elementos marcados como proxima mantencion en la siguiente parada.';
+
+    var doc = new jsPDFCtor({ unit: 'mm', format: 'a4' });
+    var y = 20;
+    var pageH = 275;
+    var pageW = 210;
+
+    // --- Titulo ---
+    doc.setFontSize(17);
     doc.setFont(undefined, 'bold');
-    doc.text('Informe de inspeccion - Chute CV-201', 14, y);
-    y += 7;
+    doc.text('Informe de inspeccion - Chute de alimentacion CV-201', 14, y);
+    y += 6;
+    doc.setDrawColor(200);
+    doc.line(14, y, pageW - 14, y);
+    y += 8;
+
     doc.setFontSize(10);
     doc.setFont(undefined, 'normal');
-    var turnoIdx = parseInt(turnoSelect.value, 10);
-    doc.text('Turno: ' + turnoLabels[turnoIdx], 14, y); y += 5;
+    doc.text('Turno: ' + turnoTxt, 14, y); y += 5;
     doc.text('Fecha de generacion: ' + new Date().toLocaleString(), 14, y); y += 5;
-    var gapVal = gapInput.value || 'No especificado';
     doc.text('G.A.P. placa guia - correa: ' + gapVal, 14, y); y += 9;
 
     function sectionHeader(title) {
-      if (y > pageH) { doc.addPage(); y = 18; }
-      doc.setFontSize(12);
+      if (y > pageH) { doc.addPage(); y = 20; }
+      doc.setFontSize(12.5);
       doc.setFont(undefined, 'bold');
       doc.text(title, 14, y); y += 6;
-      doc.setFontSize(9);
+      doc.setFontSize(9.5);
       doc.setFont(undefined, 'normal');
     }
 
-    function summaryLine(cat) {
-      var counts = {};
-      cat.states.forEach(function(s) { counts[s.name] = 0; });
-      Object.keys(meshStates).forEach(function(k) {
-        var e = meshStates[k];
-        if (e.category === (cat === CATEGORIES.placas ? 'placas' : 'estructura')) {
-          counts[cat.states[e.state].name] = (counts[cat.states[e.state].name] || 0) + 1;
-        }
-      });
-      cat.states.forEach(function(s) {
-        if (y > pageH) { doc.addPage(); y = 18; }
-        doc.text('  ' + s.name + ': ' + counts[s.name], 16, y); y += 4.5;
-      });
-      y += 2;
+    // --- Conclusion ---
+    sectionHeader('Resumen ejecutivo');
+    var splitConclusion = doc.splitTextToSize(conclusion, pageW - 28);
+    doc.text(splitConclusion, 14, y);
+    y += splitConclusion.length * 4.5 + 6;
+
+    // --- Conteos ---
+    sectionHeader('Conteo - Placas guia');
+    CATEGORIES.placas.states.forEach(function(s) {
+      if (y > pageH) { doc.addPage(); y = 20; }
+      doc.text('  ' + s.name + ': ' + countsPlacas[s.name], 16, y); y += 4.5;
+    });
+    y += 4;
+
+    sectionHeader('Conteo - Estructura');
+    CATEGORIES.estructura.states.forEach(function(s) {
+      if (y > pageH) { doc.addPage(); y = 20; }
+      doc.text('  ' + s.name + ': ' + countsEstructura[s.name], 16, y); y += 4.5;
+    });
+    y += 6;
+
+    // --- Fotos ---
+    function addPhotoPair(title1, img1, title2, img2) {
+      if (y > pageH - 70) { doc.addPage(); y = 20; }
+      sectionHeader(title1 + '  /  ' + title2);
+      var w = (pageW - 14 - 14 - 6) / 2;
+      var h = w * 0.62;
+      doc.setFontSize(8.5);
+      doc.text(title1, 14, y);
+      doc.text(title2, 14 + w + 6, y);
+      y += 3;
+      doc.addImage(img1, 'PNG', 14, y, w, h);
+      doc.addImage(img2, 'PNG', 14 + w + 6, y, w, h);
+      y += h + 8;
     }
 
-    sectionHeader('Resumen - Placas guia');
-    summaryLine(CATEGORIES.placas);
-    sectionHeader('Resumen - Estructura');
-    summaryLine(CATEGORIES.estructura);
+    function addPhotoSingle(title, img) {
+      if (y > pageH - 70) { doc.addPage(); y = 20; }
+      doc.setFontSize(8.5);
+      doc.setFont(undefined, 'bold');
+      doc.text(title, 14, y);
+      doc.setFont(undefined, 'normal');
+      y += 3;
+      var w = pageW - 28;
+      var h = w * 0.55;
+      doc.addImage(img, 'PNG', 14, y, w, h);
+      y += h + 8;
+    }
 
+    doc.addPage(); y = 20;
+    sectionHeader('Fotografias - Placas guia cambiadas');
+    addPhotoPair('Lado izquierdo', imgPlacasIzq, 'Lado derecho', imgPlacasDer);
+
+    doc.addPage(); y = 20;
+    sectionHeader('Fotografias - Estructura cambiada');
+    addPhotoPair('Lado izquierdo', imgEstructIzq, 'Lado derecho', imgEstructDer);
+    addPhotoSingle('Zona central', imgEstructCentral);
+
+    // --- Detalle ---
     function detailList(catKey, catDef) {
       var items = Object.keys(meshStates)
         .map(function(k) { return meshStates[k]; })
         .filter(function(e) { return e.category === catKey && e.state !== 0; });
       if (items.length === 0) return;
+      if (y > pageH - 20) { doc.addPage(); y = 20; }
       sectionHeader('Detalle de cambios - ' + catDef.label);
       items.forEach(function(e) {
-        if (y > pageH) { doc.addPage(); y = 18; }
+        if (y > pageH) { doc.addPage(); y = 20; }
         doc.text('  ' + e.label + '  ->  ' + catDef.states[e.state].name, 16, y);
         y += 4.5;
       });
       y += 3;
     }
 
+    doc.addPage(); y = 20;
+    sectionHeader('Detalle completo de cambios');
     detailList('placas', CATEGORIES.placas);
     detailList('estructura', CATEGORIES.estructura);
 
     doc.save('informe_chute_cv201_' + Date.now() + '.pdf');
+    statusEl.textContent = 'Informe generado.';
   }
 
   document.getElementById('btn-reset').addEventListener('click', function() {
