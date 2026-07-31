@@ -165,7 +165,6 @@ function startApp() {
   scene.add(dirLight2);
 
   var target = new THREE.Vector3(0,0,0);
-  var isDragging = false, prevX = 0, prevY = 0;
   var spherical = new THREE.Spherical();
   var offset = new THREE.Vector3();
   var minRadius = 1, maxRadius = 100000;
@@ -177,64 +176,93 @@ function startApp() {
     camera.lookAt(target);
   }
 
-  renderer.domElement.addEventListener('mousedown', function(e) {
-    isDragging = true; prevX = e.clientX; prevY = e.clientY;
+  function panCamera(dx, dy) {
+    var distance = offset.length();
+    var panScale = distance * 0.0018;
+    var camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    var camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    target.addScaledVector(camRight, -dx * panScale);
+    target.addScaledVector(camUp, dy * panScale);
+  }
+
+  // --- Control unificado de camara (mouse y tactil) usando Pointer Events ---
+  // Un puntero = rotar. Dos punteros = pellizcar para zoom + arrastrar para pan.
+  renderer.domElement.style.touchAction = 'none';
+  var pointers = {};
+  var pinchStartDist = null;
+  var panStartMid = null;
+
+  function pointDist(a, b) {
+    var dx = a.x - b.x, dy = a.y - b.y;
+    return Math.sqrt(dx*dx + dy*dy);
+  }
+  function pointMid(a, b) {
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  renderer.domElement.addEventListener('pointerdown', function(e) {
+    renderer.domElement.setPointerCapture(e.pointerId);
+    pointers[e.pointerId] = { x: e.clientX, y: e.clientY, type: e.pointerType };
+    var ids = Object.keys(pointers);
+    if (ids.length === 2) {
+      var p0 = pointers[ids[0]], p1 = pointers[ids[1]];
+      pinchStartDist = pointDist(p0, p1);
+      panStartMid = pointMid(p0, p1);
+    }
   });
-  window.addEventListener('mouseup', function() { isDragging = false; });
-  window.addEventListener('mousemove', function(e) {
-    if (!isDragging) return;
-    var dx = e.clientX - prevX, dy = e.clientY - prevY;
-    prevX = e.clientX; prevY = e.clientY;
-    spherical.theta -= dx * 0.005;
-    spherical.phi -= dy * 0.005;
-    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
-    updateCameraFromSpherical();
+
+  renderer.domElement.addEventListener('pointermove', function(e) {
+    if (!pointers[e.pointerId]) return;
+    var prev = pointers[e.pointerId];
+    var dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+    pointers[e.pointerId] = { x: e.clientX, y: e.clientY, type: e.pointerType };
+    var ids = Object.keys(pointers);
+
+    if (ids.length === 1) {
+      var sens = (prev.type === 'touch') ? 0.0025 : 0.005;
+      spherical.theta -= dx * sens;
+      spherical.phi -= dy * sens;
+      spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+      updateCameraFromSpherical();
+    } else if (ids.length === 2) {
+      var p0 = pointers[ids[0]], p1 = pointers[ids[1]];
+      var newDist = pointDist(p0, p1);
+      var newMid = pointMid(p0, p1);
+      if (pinchStartDist) {
+        var scale = pinchStartDist / newDist;
+        spherical.radius *= scale;
+        spherical.radius = Math.max(minRadius, Math.min(maxRadius, spherical.radius));
+        pinchStartDist = newDist;
+      }
+      if (panStartMid) {
+        panCamera(newMid.x - panStartMid.x, newMid.y - panStartMid.y);
+        panStartMid = newMid;
+      }
+      updateCameraFromSpherical();
+    }
   });
+
+  function releasePointer(e) {
+    delete pointers[e.pointerId];
+    var ids = Object.keys(pointers);
+    pinchStartDist = null;
+    panStartMid = null;
+    if (ids.length === 2) {
+      var p0 = pointers[ids[0]], p1 = pointers[ids[1]];
+      pinchStartDist = pointDist(p0, p1);
+      panStartMid = pointMid(p0, p1);
+    }
+  }
+  renderer.domElement.addEventListener('pointerup', releasePointer);
+  renderer.domElement.addEventListener('pointercancel', releasePointer);
+  renderer.domElement.addEventListener('pointerleave', releasePointer);
+
   renderer.domElement.addEventListener('wheel', function(e) {
     e.preventDefault();
     spherical.radius *= (e.deltaY > 0) ? 1.1 : 0.9;
     spherical.radius = Math.max(minRadius, Math.min(maxRadius, spherical.radius));
     updateCameraFromSpherical();
   }, { passive: false });
-
-  // --- Soporte tactil (moviles/tablet): un dedo rota, dos dedos hacen zoom ---
-  var touchPrevDist = null;
-  function touchDist(t0, t1) {
-    var dx = t0.clientX - t1.clientX, dy = t0.clientY - t1.clientY;
-    return Math.sqrt(dx*dx + dy*dy);
-  }
-  renderer.domElement.addEventListener('touchstart', function(e) {
-    if (e.touches.length === 1) {
-      isDragging = true;
-      prevX = e.touches[0].clientX;
-      prevY = e.touches[0].clientY;
-    } else if (e.touches.length === 2) {
-      isDragging = false;
-      touchPrevDist = touchDist(e.touches[0], e.touches[1]);
-    }
-  }, { passive: true });
-  renderer.domElement.addEventListener('touchmove', function(e) {
-    e.preventDefault();
-    if (e.touches.length === 1 && isDragging) {
-      var dx = e.touches[0].clientX - prevX, dy = e.touches[0].clientY - prevY;
-      prevX = e.touches[0].clientX; prevY = e.touches[0].clientY;
-      spherical.theta -= dx * 0.0025;
-      spherical.phi -= dy * 0.0025;
-      spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
-      updateCameraFromSpherical();
-    } else if (e.touches.length === 2 && touchPrevDist !== null) {
-      var d = touchDist(e.touches[0], e.touches[1]);
-      var scale = touchPrevDist / d;
-      touchPrevDist = d;
-      spherical.radius *= scale;
-      spherical.radius = Math.max(minRadius, Math.min(maxRadius, spherical.radius));
-      updateCameraFromSpherical();
-    }
-  }, { passive: false });
-  renderer.domElement.addEventListener('touchend', function(e) {
-    if (e.touches.length === 0) { isDragging = false; touchPrevDist = null; }
-    else if (e.touches.length === 1) { touchPrevDist = null; isDragging = true; prevX = e.touches[0].clientX; prevY = e.touches[0].clientY; }
-  }, { passive: true });
 
   var loader = new THREE.GLTFLoader();
   var raycaster = new THREE.Raycaster();
@@ -502,8 +530,17 @@ function startApp() {
 
           // Centro real de la geometria en coordenadas de mundo (no la posicion del nodo,
           // que en este export viene siempre en 0,0,0 con la forma "horneada" en los vertices)
-          child.geometry.computeBoundingBox();
-          var localCenter = child.geometry.boundingBox.getCenter(new THREE.Vector3());
+          // Centroide real (promedio de vertices) en coordenadas de mundo. Se usa esto en vez
+          // del centro de la caja delimitadora porque en piezas con forma en L, huecas o
+          // irregulares el centro de la caja puede caer fuera de la pieza (en el aire).
+          var posAttr = child.geometry.attributes.position;
+          var sum = new THREE.Vector3();
+          for (var vi = 0; vi < posAttr.count; vi++) {
+            sum.x += posAttr.getX(vi);
+            sum.y += posAttr.getY(vi);
+            sum.z += posAttr.getZ(vi);
+          }
+          var localCenter = sum.divideScalar(posAttr.count);
           var worldCenter = localCenter.clone().applyMatrix4(child.matrixWorld);
 
           var savedState = (saved[child.name] && typeof saved[child.name].state === 'number') ? saved[child.name].state : 0;
