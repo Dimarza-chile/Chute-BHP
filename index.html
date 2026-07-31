@@ -625,6 +625,54 @@ function startApp() {
   function isDer(e) { return e.label.indexOf('der') !== -1; }
   function isCentral(e) { return e.label.indexOf('sup') !== -1 || e.label.indexOf('ant') !== -1; }
 
+  // --- Vista ortogonal "de frente" de una pared, cortando el modelo por el centro ---
+  // sideSign: +1 = lado derecho segun el sentido de carga, -1 = lado izquierdo
+  function snapshotWallElevation(category, sideSign) {
+    if (!modelBox) return null;
+    var up = new THREE.Vector3(0, 1, 0);
+    var rightVec = new THREE.Vector3().crossVectors(flowDir, up).normalize();
+    var center = modelBox.getCenter(new THREE.Vector3());
+    var size = modelBox.getSize(new THREE.Vector3());
+
+    var planeConst = -sideSign * rightVec.dot(center);
+    var clipPlane = new THREE.Plane(rightVec.clone().multiplyScalar(sideSign), planeConst);
+
+    var lengthAlongFlow = Math.abs(flowDir.x) > 0.5 ? size.x : size.z;
+    var halfW = lengthAlongFlow * 0.55;
+    var halfH = size.y * 1.3;
+    var orthoCam = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.01, 100000);
+
+    var camDist = (Math.abs(flowDir.x) > 0.5 ? size.z : size.x) * 3 + 2;
+    var camPos = center.clone().addScaledVector(rightVec, -sideSign * camDist);
+    orthoCam.position.copy(camPos);
+    orthoCam.up.copy(up);
+    orthoCam.lookAt(center);
+    orthoCam.updateProjectionMatrix();
+
+    var savedOpacity = {}, savedTransparent = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      savedOpacity[k] = e.mesh.material.opacity;
+      savedTransparent[k] = e.mesh.material.transparent;
+      var show = e.category === category && e.state !== 0;
+      e.mesh.material.transparent = true;
+      e.mesh.material.opacity = show ? 1 : 0.05;
+    });
+
+    renderer.clippingPlanes = [clipPlane];
+    renderer.render(scene, orthoCam);
+    var dataUrl = renderer.domElement.toDataURL('image/png');
+    renderer.clippingPlanes = [];
+
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      e.mesh.material.opacity = savedOpacity[k];
+      e.mesh.material.transparent = savedTransparent[k];
+    });
+    renderer.render(scene, camera);
+    return dataUrl;
+  }
+
   function generatePdfReport() {
     var jsPDFCtor = window.jspdf ? window.jspdf.jsPDF : null;
     if (!jsPDFCtor) { alert('No se pudo cargar el generador de PDF. Revisa tu conexion a internet.'); return; }
@@ -677,10 +725,10 @@ function startApp() {
     ];
 
     // --- Capturas: placas izq/der y estructura izq/der/central (solo piezas con cambio) ---
-    var imgPlacasIzq = snapshotView(Math.PI/2, Math.PI/2.3, 0.75, function(e) { return e.category==='placas' && e.state!==0 && isIzq(e); }, clipKeepIzq);
-    var imgPlacasDer = snapshotView(-Math.PI/2, Math.PI/2.3, 0.75, function(e) { return e.category==='placas' && e.state!==0 && isDer(e); }, clipKeepDer);
-    var imgEstructIzq = snapshotView(Math.PI/2, Math.PI/2.3, 0.85, function(e) { return e.category==='estructura' && e.state!==0 && isIzq(e); }, clipKeepIzq);
-    var imgEstructDer = snapshotView(-Math.PI/2, Math.PI/2.3, 0.85, function(e) { return e.category==='estructura' && e.state!==0 && isDer(e); }, clipKeepDer);
+    var imgPlacasIzq = snapshotWallElevation('placas', -1);
+    var imgPlacasDer = snapshotWallElevation('placas', 1);
+    var imgEstructIzq = snapshotWallElevation('estructura', -1);
+    var imgEstructDer = snapshotWallElevation('estructura', 1);
     var imgEstructCentral = snapshotView(defaultSpherical.theta, Math.PI/2.6, 1.1, function(e) { return e.category==='estructura' && e.state!==0 && isCentral(e); }, clipKeepCentral);
 
     // --- Conclusion legible, generada a partir de los conteos ---
@@ -777,12 +825,12 @@ function startApp() {
     }
 
     doc.addPage(); y = 20;
-    sectionHeader('Fotografias - Placas guia cambiadas');
-    addPhotoPair('Lado izquierdo', imgPlacasIzq, 'Lado derecho', imgPlacasDer);
+    sectionHeader('Fotografias - Placas guia cambiadas (corte central, segun sentido de carga)');
+    addPhotoPair('Pared izquierda', imgPlacasIzq, 'Pared derecha', imgPlacasDer);
 
     doc.addPage(); y = 20;
-    sectionHeader('Fotografias - Estructura cambiada');
-    addPhotoPair('Lado izquierdo', imgEstructIzq, 'Lado derecho', imgEstructDer);
+    sectionHeader('Fotografias - Estructura cambiada (corte central, segun sentido de carga)');
+    addPhotoPair('Pared izquierda', imgEstructIzq, 'Pared derecha', imgEstructDer);
     addPhotoSingle('Zona central', imgEstructCentral);
 
     // --- Detalle ---
