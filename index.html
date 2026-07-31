@@ -112,6 +112,8 @@ function startApp() {
   var COLOR_RED = 0xE24B4A;
   var COLOR_YELLOW = 0xFAC775;
   var DIM_OPACITY = 0.2;
+  var OT_NUMERO = "34W";
+  var OT_NOMBRE = "Mec Camb Cajn Alim CV201 SD";
 
   var CATEGORIES = {
     estructura: {
@@ -335,7 +337,8 @@ function startApp() {
       typeLabelMeshes.push({
         mesh: info.sample.mesh, category: info.sample.category,
         el: div, line: line, dot: dot,
-        offset: offsets[i % offsets.length]
+        offset: offsets[i % offsets.length],
+        worldCenter: info.sample.worldCenter
       });
       i++;
     });
@@ -354,8 +357,7 @@ function startApp() {
     var w = window.innerWidth, h = window.innerHeight;
     typeLabelMeshes.forEach(function(t) {
       if (t.el.style.display === 'none') return;
-      var pos = new THREE.Vector3();
-      t.mesh.getWorldPosition(pos);
+      var pos = t.worldCenter.clone();
       pos.project(camera);
       if (pos.z > 1) {
         t.el.style.display = 'none'; t.line.style.display = 'none'; t.dot.style.display = 'none';
@@ -462,6 +464,7 @@ function startApp() {
     loader.load('./chute.glb', function(gltf) {
       var model = gltf.scene;
       scene.add(model);
+      model.updateMatrixWorld(true);
 
       var box = new THREE.Box3().setFromObject(model);
       modelBox = box;
@@ -497,8 +500,15 @@ function startApp() {
           );
           child.add(edges);
 
+          // Centro real de la geometria en coordenadas de mundo (no la posicion del nodo,
+          // que en este export viene siempre en 0,0,0 con la forma "horneada" en los vertices)
+          child.geometry.computeBoundingBox();
+          var localCenter = child.geometry.boundingBox.getCenter(new THREE.Vector3());
+          var worldCenter = localCenter.clone().applyMatrix4(child.matrixWorld);
+
           var savedState = (saved[child.name] && typeof saved[child.name].state === 'number') ? saved[child.name].state : 0;
-          meshStates[child.name] = { mesh: child, state: savedState, label: name, category: category };
+          var savedTs = (saved[child.name] && saved[child.name].ts) ? saved[child.name].ts : null;
+          meshStates[child.name] = { mesh: child, state: savedState, label: name, category: category, worldCenter: worldCenter, ts: savedTs };
         }
       });
 
@@ -513,6 +523,7 @@ function startApp() {
         Object.keys(data).forEach(function(k) {
           if (meshStates[k] && !dirtyKeys[k] && typeof data[k].state === 'number' && data[k].state !== meshStates[k].state) {
             meshStates[k].state = data[k].state;
+            meshStates[k].ts = data[k].ts || meshStates[k].ts;
             changed = true;
           }
         });
@@ -566,14 +577,16 @@ function startApp() {
     if (keys.length === 0) return;
     var turnoIdx = parseInt(turnoSelect.value, 10);
     var turno = turnoLabels[turnoIdx];
+    var nowTs = Date.now();
     var payload = {};
     keys.forEach(function(k) {
       var e = meshStates[k];
-      payload[k] = { state: e.state, category: e.category, turno: turno, turnoIdx: turnoIdx, ts: Date.now() };
+      payload[k] = { state: e.state, category: e.category, turno: turno, turnoIdx: turnoIdx, ts: nowTs };
     });
     var statusEl = document.getElementById('save-status');
     statusEl.textContent = 'Guardando...';
     fb.update(fb.ref(fb.db, 'estados'), payload).then(function() {
+      keys.forEach(function(k) { meshStates[k].ts = nowTs; });
       dirtyKeys = {};
       updateSaveButton();
       statusEl.textContent = 'Guardado ' + new Date().toLocaleTimeString();
@@ -779,7 +792,7 @@ function startApp() {
     var imgPlacasDer = snapshotWallElevation('placas', 1);
     var imgEstructIzq = snapshotWallElevation('estructura', -1);
     var imgEstructDer = snapshotWallElevation('estructura', 1);
-    var imgEstructCentral = snapshotView(defaultSpherical.theta, Math.PI/2.6, 1.1, function(e) { return e.category==='estructura' && e.state!==0 && isCentral(e); }, clipKeepCentral, 1.5);
+    var imgEstructCentral = snapshotView(defaultSpherical.theta, defaultSpherical.phi, 1.25, function(e) { return e.category==='estructura' && e.state!==0 && isCentral(e); }, [], 1.7);
 
     // --- Conclusion legible ---
     var totalPlacasCambio = countsPlacas['Cambio'] || 0;
@@ -789,8 +802,22 @@ function startApp() {
     var totalEstructProx = countsEstructura['Proximo a cambio'] || 0;
     var totalCambiosGeneral = totalPlacasCambio + totalPlacasVolteo + totalEstructCambio;
 
-    var conclusion = 'Durante el turno ' + turnoTxt + ' se registraron ' + totalCambiosGeneral +
-      ' intervenciones en el chute de alimentacion CV-201. En placas guia se realizaron ' +
+    // --- Rango de fechas real de las modificaciones (basado en los ts guardados) ---
+    var allTs = Object.keys(meshStates)
+      .map(function(k) { return meshStates[k]; })
+      .filter(function(e) { return e.state !== 0 && e.ts; })
+      .map(function(e) { return e.ts; });
+    var fechaDesde, fechaHasta;
+    if (allTs.length > 0) {
+      fechaDesde = new Date(Math.min.apply(null, allTs)).toLocaleDateString();
+      fechaHasta = new Date(Math.max.apply(null, allTs)).toLocaleDateString();
+    } else {
+      fechaDesde = fechaHasta = 'Sin registros guardados aun';
+    }
+    var rangoFechas = (fechaDesde === fechaHasta) ? fechaDesde : (fechaDesde + '  al  ' + fechaHasta);
+
+    var conclusion = 'Entre el ' + rangoFechas + ' se registraron ' + totalCambiosGeneral +
+      ' intervenciones en el chute de alimentacion CV-201 (OT ' + OT_NUMERO + ' - ' + OT_NOMBRE + '). En placas guia se realizaron ' +
       totalPlacasCambio + ' cambio(s) y ' + totalPlacasVolteo + ' volteo(s), quedando ' +
       totalPlacasProx + ' placa(s) marcada(s) para proxima mantencion. En la estructura se registraron ' +
       totalEstructCambio + ' cambio(s), con ' + totalEstructProx + ' elemento(s) marcado(s) para proximo cambio. ' +
@@ -847,21 +874,24 @@ function startApp() {
     doc.text('Chute de alimentacion CV-201', margin, 31);
     doc.setFontSize(9.5);
     doc.text('Mineria Escondida - BHP  ·  Contratista Dimarza', margin, 39);
+    doc.setFontSize(8.5);
+    doc.text('Fecha de generacion del informe: ' + new Date().toLocaleString(), margin, 45);
     doc.setTextColor(0, 0, 0);
     y = 58;
 
     doc.setFillColor.apply(doc, C_BG);
-    doc.roundedRect(margin, y, contentW, 26, 2, 2, 'F');
+    doc.roundedRect(margin, y, contentW, 32, 2, 2, 'F');
     doc.setFontSize(9.5);
     doc.setFont(undefined, 'bold');
-    doc.text('Turno', margin + 6, y + 8);
-    doc.text('Fecha', margin + 6, y + 16);
-    doc.text('G.A.P. placa guia - correa', margin + 90, y + 8);
+    doc.text('OT / Actividad', margin + 6, y + 8);
+    doc.text('Modificaciones realizadas', margin + 6, y + 16);
+    doc.text('G.A.P. placa guia - correa', margin + 6, y + 24);
     doc.setFont(undefined, 'normal');
-    doc.text(turnoTxt, margin + 40, y + 8);
-    doc.text(new Date().toLocaleString(), margin + 40, y + 16);
-    doc.text(gapVal, margin + 150, y + 8);
-    y += 36;
+    var otLine = doc.splitTextToSize(OT_NUMERO + '  -  ' + OT_NOMBRE, contentW - 60);
+    doc.text(otLine, margin + 55, y + 8);
+    doc.text(rangoFechas, margin + 55, y + 16);
+    doc.text(gapVal, margin + 55, y + 24);
+    y += 42;
 
     sectionHeader('Resumen ejecutivo');
     var splitConclusion = doc.splitTextToSize(conclusion, contentW);
