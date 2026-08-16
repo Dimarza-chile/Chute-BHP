@@ -68,17 +68,6 @@
   #btn-save { background:#2C2C2A; color:#fff; border-color:#2C2C2A; font-weight:600; }
   #btn-save:disabled { background:#ccc; border-color:#ccc; cursor:default; }
   #save-status { font-size:11px; color:#888; margin-top:6px; text-align:center; min-height:14px; }
-  #turno-input { width:100%; padding:6px; font-size:12px; border-radius:6px; border:1px solid #ccc; margin-top:8px; box-sizing:border-box; }
-  #turno-label { font-size:11px; color:#888; margin-top:8px; display:block; }
-
-  /* --- Info de pieza seleccionada: bloque de apuntalamiento (solo si hubo intervencion) --- */
-  #sel-apuntalado-block { margin-top:10px; padding-top:10px; border-top:1px solid #e5e3dd; }
-  #sel-apuntalado-block label { display:flex; align-items:center; gap:6px; font-size:12px; color:#444; cursor:pointer; }
-  #sel-soldadura-wrap { margin-top:6px; }
-  #sel-soldadura-wrap select, #sel-soldadura-wrap input {
-    width:100%; padding:5px; font-size:12px; border-radius:6px; border:1px solid #ccc; box-sizing:border-box; margin-top:3px;
-  }
-  #sel-close { margin-top:10px; width:100%; padding:6px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:11px; color:#666; }
 
   /* --- Modal de configuracion de pernos --- */
   .modal-overlay {
@@ -96,7 +85,12 @@
   .modal-close { border:none; background:none; font-size:20px; color:#999; cursor:pointer; line-height:1; padding:2px 6px; }
   .modal-body { padding:16px 20px; overflow-y:auto; }
   .modal-footer { padding:12px 20px; border-top:1px solid #eee; display:flex; align-items:center; justify-content:space-between; gap:10px; }
-  .pernos-row { border:1px solid #e5e3dd; border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+  .pernos-row { border:1px solid #e5e3dd; border-radius:10px; padding:12px 14px; margin-bottom:12px; display:flex; gap:14px; }
+  .pernos-row-thumb {
+    width:110px; height:110px; flex-shrink:0; border-radius:8px; background:#f4f3ef;
+    border:1px solid #e5e3dd; object-fit:contain;
+  }
+  .pernos-row-content { flex:1; min-width:0; }
   .pernos-row-title { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
   .pernos-row-title strong { font-size:13px; color:#2C2C2A; }
   .pernos-row-title span { font-size:11px; color:#888; }
@@ -183,8 +177,6 @@
   <div id="category-toggle"></div>
   <div id="legend"></div>
   <div id="counts"></div>
-  <label id="turno-label">Turno</label>
-  <select id="turno-input"></select>
   <label id="gap-label" style="font-size:11px; color:#888; margin-top:8px; display:block;">G.A.P. placa guia - correa (opcional)</label>
   <input id="gap-input" type="text" placeholder='Ej: 3 mm o 1/8"' style="width:100%; padding:6px; font-size:12px; border-radius:6px; border:1px solid #ccc; box-sizing:border-box;">
   <button id="btn-save">Guardar cambios</button>
@@ -196,19 +188,6 @@
 <div id="selected-info">
   <strong id="sel-name">-</strong>
   <div id="sel-state">-</div>
-  <div id="sel-apuntalado-block" style="display:none;">
-    <label><input type="checkbox" id="sel-apuntalado-check"> Tuerca apuntalada</label>
-    <div id="sel-soldadura-wrap" style="display:none;">
-      <label style="display:block; font-size:10.5px; color:#888;">Tipo de soldadura</label>
-      <select id="sel-soldadura-select">
-        <option value="Punto (tack weld)">Punto (tack weld)</option>
-        <option value="Cordon continuo">Cordon continuo</option>
-        <option value="Otro">Otro</option>
-      </select>
-      <input type="text" id="sel-soldadura-otro" placeholder="Especificar..." style="display:none;">
-    </div>
-    <button id="sel-close">Listo</button>
-  </div>
 </div>
 
 <div class="modal-overlay" id="pernos-modal-overlay">
@@ -368,6 +347,9 @@ function startApp() {
       // carga -- el informe PDF puede generar las vistas de corte por pared. Chutes sin
       // esta convencion (o con geometria distinta) simplemente omiten esa seccion.
       pdfWallElevation: true,
+      // G.A.P. (separacion placa guia - correa) solo aplica a chutes con skirting rubber.
+      // Chutes sin esa convencion simplemente no definen esta bandera (queda en false).
+      showGap: true,
       categorias: {
         estructura: {
           label: "Estructura",
@@ -402,7 +384,9 @@ function startApp() {
         { key: "largo", label: "Largo", type: "text", placeholder: 'Ej: 3" o 60mm' },
         { key: "grado", label: "Grado / Clase", type: "grado" },
         { key: "tuercaAutoblocante", label: "Tuerca autoblocante", type: "checkbox" },
-        { key: "arandelaAutoblocante", label: "Arandela autoblocante", type: "checkbox" }
+        { key: "arandelaAutoblocante", label: "Arandela autoblocante", type: "checkbox" },
+        { key: "apuntalado", label: "Tuerca apuntalada", type: "checkbox" },
+        { key: "soldadura", label: "Tipo de soldadura (si aplica)", type: "text", placeholder: "Ej: Punto (tack weld), Cordon continuo" }
       ]
     },
     "canaletaBN005": {
@@ -454,7 +438,9 @@ function startApp() {
         { key: "cantidad", label: "Cantidad de pernos", type: "number" },
         { key: "tuerca", label: "Se uso tuerca", type: "checkbox" },
         { key: "arandela", label: "Se uso arandela", type: "checkbox" },
-        { key: "arandelaPresion", label: "Se uso arandela de presion", type: "checkbox" }
+        { key: "arandelaPresion", label: "Se uso arandela de presion", type: "checkbox" },
+        { key: "apuntalado", label: "Tuerca apuntalada", type: "checkbox" },
+        { key: "soldadura", label: "Tipo de soldadura (si aplica)", type: "text", placeholder: "Ej: Punto (tack weld), Cordon continuo" }
       ]
     }
   };
@@ -496,6 +482,12 @@ function startApp() {
 
   document.title = currentChute.nombre + ' - Inspeccion';
   document.getElementById('chute-title').textContent = currentChute.nombre;
+
+  // El G.A.P. (separacion placa guia - correa) solo aplica a chutes con skirting rubber.
+  if (!currentChute.showGap) {
+    document.getElementById('gap-label').style.display = 'none';
+    document.getElementById('gap-input').style.display = 'none';
+  }
 
   // --- Menu lateral para elegir chute ---
   var menuEl = document.getElementById('chute-menu');
@@ -614,7 +606,7 @@ function startApp() {
       var e = meshStates[k];
       var raw = getRawPlateCode(e.label);
       if (sigByRawCode[raw]) return;
-      var dims = plateDimsMm(e.mesh);
+      var dims = pieceDimsMm(e.mesh);
       var vcount = e.mesh.geometry.attributes.position.count;
       sigByRawCode[raw] = e.category + '|' + vcount + '|' + dims.join('x');
     });
@@ -633,63 +625,15 @@ function startApp() {
     });
   }
 
-  // --- Dibujo esquematico (no foto) de la marca de grado en la cabeza del perno ---
-  // Convencion SAE J429: 0 lineas radiales = Grado 2, 3 lineas = Grado 5, 6 lineas = Grado 8.
-  // Los pernos metricos llevan la clase de propiedad (ej. 8.8, 10.9) estampada como numero.
-  function drawBoltGradeIcon(canvas, sistema, grado) {
-    var ctx = canvas.getContext('2d');
-    var w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    var cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 3;
-
-    ctx.strokeStyle = '#2C2C2A';
-    ctx.fillStyle = '#f4f3ef';
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    for (var i = 0; i < 6; i++) {
-      var a = Math.PI / 3 * i - Math.PI / 2;
-      var px = cx + r * Math.cos(a), py = cy + r * Math.sin(a);
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    if (sistema === 'metrico') {
-      ctx.fillStyle = '#2C2C2A';
-      ctx.font = 'bold ' + Math.round(r * 0.62) + 'px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(grado || '?', cx, cy + 1);
-      return;
-    }
-
-    var lineCount = grado === 'Grado 8' ? 6 : grado === 'Grado 5' ? 3 : grado === 'Grado 2' ? 0 : -1;
-    if (lineCount < 0) {
-      ctx.fillStyle = '#2C2C2A';
-      ctx.font = 'bold ' + Math.round(r * 0.45) + 'px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(grado || '?', cx, cy + 1);
-      return;
-    }
-    ctx.strokeStyle = '#2C2C2A';
-    ctx.lineWidth = Math.max(1.2, r * 0.12);
-    for (var j = 0; j < lineCount; j++) {
-      var ang = (Math.PI * 2 / lineCount) * j - Math.PI / 2;
-      var ix = cx + r * 0.32 * Math.cos(ang), iy = cy + r * 0.32 * Math.sin(ang);
-      var ox = cx + r * 0.82 * Math.cos(ang), oy = cy + r * 0.82 * Math.sin(ang);
-      ctx.beginPath();
-      ctx.moveTo(ix, iy);
-      ctx.lineTo(ox, oy);
-      ctx.stroke();
-    }
-  }
-
-  // --- Dibujo esquematico del tipo de cabeza del perno (vista superior para las que se
-  // reconocen mejor de frente -- hexagonal, cuadrada, socket/allen -- y vista lateral para
-  // las que se reconocen mejor de perfil -- avellanado, tipo candado) ---
-  function drawBoltHeadTypeIcon(canvas, tipo) {
+  // --- Dibujo esquematico (no foto) de la cabeza del perno CON su marca de grado ---
+  // Dibuja la silueta real de la cabeza segun su tipo, y superpone la marca de grado sobre
+  // el area plana de esa silueta (investigado: los pernos "plow bolt" / avellanados / tipo
+  // candado SI llevan marca de grado, en la superficie plana de la cabeza -- misma
+  // convencion SAE J429 de siempre (0 lineas = Grado 2, 3 = Grado 5, 6 = Grado 8), solo que
+  // no es una cabeza hexagonal. Los metricos llevan la clase de propiedad (ej. 8.8, 10.9)
+  // estampada como numero. Las cabezas socket/allen no tienen superficie plana visible, asi
+  // que no se les dibuja marca.
+  function drawBoltHeadGradeIcon(canvas, tipoCabeza, sistema, grado) {
     var ctx = canvas.getContext('2d');
     var w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
@@ -697,15 +641,19 @@ function startApp() {
     ctx.strokeStyle = '#2C2C2A';
     ctx.fillStyle = '#f4f3ef';
     ctx.lineWidth = 1.4;
-    var t = (tipo || '').toLowerCase();
+    var t = (tipoCabeza || '').toLowerCase();
+
+    var markX = cx, markY = cy, markR = r * 0.8, hasFlat = true;
 
     if (t.indexOf('cuadrada') !== -1) {
       var s = r * 1.5;
       ctx.beginPath();
       ctx.rect(cx - s / 2, cy - s / 2, s, s);
       ctx.fill(); ctx.stroke();
+      markR = s * 0.42;
     } else if (t.indexOf('avellanad') !== -1) {
-      // Perfil lateral: cabeza embutida, plana arriba, angulada hacia el vastago.
+      // Perfil lateral: cabeza embutida, plana arriba, angulada hacia el vastago -- la
+      // marca de grado va sobre esa parte plana superior.
       ctx.beginPath();
       ctx.moveTo(cx - r * 0.9, cy - r * 0.55);
       ctx.lineTo(cx + r * 0.9, cy - r * 0.55);
@@ -713,14 +661,14 @@ function startApp() {
       ctx.lineTo(cx - r * 0.28, cy + r * 0.75);
       ctx.closePath();
       ctx.fill(); ctx.stroke();
+      markY = cy - r * 0.15; markR = r * 0.55;
     } else if (t.indexOf('candado') !== -1) {
-      // Perfil lateral: cabeza redondeada (domo) sobre vastago corto.
+      // Vista superior: cabeza ovalada/asimetrica tipo "plow bolt" (evita que gire al
+      // apretar, se encaja en un rebaje de la misma forma en la placa).
       ctx.beginPath();
-      ctx.arc(cx, cy - r * 0.05, r * 0.85, Math.PI, 0);
-      ctx.lineTo(cx + r * 0.28, cy + r * 0.7);
-      ctx.lineTo(cx - r * 0.28, cy + r * 0.7);
-      ctx.closePath();
+      ctx.ellipse(cx, cy, r * 0.95, r * 0.55, 0, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
+      markR = r * 0.42;
     } else if (t.indexOf('socket') !== -1 || t.indexOf('allen') !== -1) {
       ctx.beginPath();
       ctx.arc(cx, cy, r * 0.85, 0, Math.PI * 2);
@@ -736,6 +684,7 @@ function startApp() {
       ctx.fill();
       ctx.strokeStyle = '#2C2C2A';
       ctx.stroke();
+      hasFlat = false; // sin superficie plana visible para marca de grado
     } else if (t.indexOf('hexagonal') !== -1) {
       ctx.beginPath();
       for (var j = 0; j < 6; j++) {
@@ -746,11 +695,42 @@ function startApp() {
       ctx.closePath();
       ctx.fill(); ctx.stroke();
     } else {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.85, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+    }
+
+    if (!hasFlat) return;
+
+    if (sistema === 'metrico') {
       ctx.fillStyle = '#2C2C2A';
-      ctx.font = 'bold ' + Math.round(r * 0.9) + 'px Arial';
+      ctx.font = 'bold ' + Math.round(markR * 0.78) + 'px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('?', cx, cy + 1);
+      ctx.fillText(grado || '?', markX, markY + 1);
+      return;
+    }
+
+    var lineCount = grado === 'Grado 8' ? 6 : grado === 'Grado 5' ? 3 : grado === 'Grado 2' ? 0 : -1;
+    if (lineCount < 0) {
+      ctx.fillStyle = '#2C2C2A';
+      ctx.font = 'bold ' + Math.round(markR * 0.55) + 'px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(grado || '?', markX, markY + 1);
+      return;
+    }
+    if (lineCount === 0) return; // Grado 2: sin marca (por convencion, cabeza lisa)
+    ctx.strokeStyle = '#2C2C2A';
+    ctx.lineWidth = Math.max(1.1, markR * 0.16);
+    for (var k = 0; k < lineCount; k++) {
+      var angK = (Math.PI * 2 / lineCount) * k - Math.PI / 2;
+      var ix = markX + markR * 0.25 * Math.cos(angK), iy = markY + markR * 0.25 * Math.sin(angK);
+      var ox = markX + markR * Math.cos(angK), oy = markY + markR * Math.sin(angK);
+      ctx.beginPath();
+      ctx.moveTo(ix, iy);
+      ctx.lineTo(ox, oy);
+      ctx.stroke();
     }
   }
 
@@ -906,14 +886,12 @@ function startApp() {
   var raycaster = new THREE.Raycaster();
   var mouse = new THREE.Vector2();
   var selInfoFadeTimer = null, selInfoHideTimer = null;
-  var currentSelectedKey = null;
 
-  // Etiqueta simple para piezas sin intervencion (vuelven a "No inspeccionado"): aparece
-  // y se desvanece sola a los 2s, igual que antes.
-  function showAutoFadeInfo(label, stateName) {
+  // Etiqueta de la pieza seleccionada: aparece y se desvanece sola a los 2s. El
+  // apuntalamiento/soldadura ya no se captura aca por intervencion -- es dato fijo por
+  // tipo de pieza, se configura en "Configurar pernos".
+  function showSelectedInfo(label, stateName) {
     var info = document.getElementById('selected-info');
-    document.getElementById('sel-apuntalado-block').style.display = 'none';
-    currentSelectedKey = null;
     clearTimeout(selInfoFadeTimer);
     clearTimeout(selInfoHideTimer);
     document.getElementById('sel-name').textContent = label;
@@ -927,86 +905,12 @@ function startApp() {
     }, 2000);
   }
 
-  // Mini-formulario persistente (no se desvanece solo) para piezas que si tuvieron una
-  // intervencion: permite marcar si se apuntalo la tuerca y con que tipo de soldadura.
-  function showInterventionForm(key, entry, stateName) {
-    clearTimeout(selInfoFadeTimer);
-    clearTimeout(selInfoHideTimer);
-    currentSelectedKey = key;
-    var info = document.getElementById('selected-info');
-    document.getElementById('sel-name').textContent = entry.label;
-    document.getElementById('sel-state').textContent = stateName;
-
-    var check = document.getElementById('sel-apuntalado-check');
-    var soldWrap = document.getElementById('sel-soldadura-wrap');
-    var soldSel = document.getElementById('sel-soldadura-select');
-    var soldOtro = document.getElementById('sel-soldadura-otro');
-    check.checked = !!entry.apuntalado;
-    soldWrap.style.display = check.checked ? 'block' : 'none';
-    if (entry.soldadura === 'Punto (tack weld)' || entry.soldadura === 'Cordon continuo') {
-      soldSel.value = entry.soldadura; soldOtro.style.display = 'none'; soldOtro.value = '';
-    } else if (entry.soldadura) {
-      soldSel.value = 'Otro'; soldOtro.style.display = 'block'; soldOtro.value = entry.soldadura;
-    } else {
-      soldSel.value = 'Punto (tack weld)'; soldOtro.style.display = 'none'; soldOtro.value = '';
-    }
-    document.getElementById('sel-apuntalado-block').style.display = 'block';
-
-    info.style.display = 'block';
-    void info.offsetHeight;
-    info.style.opacity = '1';
-  }
-
-  // El apuntalamiento se marca por TIPO de pieza, no por instancia individual: si dices que
-  // se apuntalo LF-01, se asume que se aplico igual a todas las piezas LF-01 que se
-  // intervinieron en esta parada (no hace falta marcarlas una por una). Solo afecta a las
-  // piezas ya intervenidas (estado distinto de "No inspeccionado"); las no tocadas quedan
-  // igual.
-  function applyToTypeGroup(key, mutateFn) {
-    var code = getPlateCode(meshStates[key].label);
-    Object.keys(meshStates).forEach(function(k) {
-      var e = meshStates[k];
-      if (e.state !== 0 && getPlateCode(e.label) === code) {
-        mutateFn(e);
-        dirtyKeys[k] = true;
-      }
-    });
-  }
-
-  document.getElementById('sel-apuntalado-check').addEventListener('change', function() {
-    if (!currentSelectedKey) return;
-    var checked = this.checked;
-    applyToTypeGroup(currentSelectedKey, function(e) { e.apuntalado = checked; });
-    document.getElementById('sel-soldadura-wrap').style.display = checked ? 'block' : 'none';
-    updateSaveButton();
-  });
-  document.getElementById('sel-soldadura-select').addEventListener('change', function() {
-    if (!currentSelectedKey) return;
-    var otroInput = document.getElementById('sel-soldadura-otro');
-    var val;
-    if (this.value === 'Otro') { otroInput.style.display = 'block'; val = otroInput.value; }
-    else { otroInput.style.display = 'none'; val = this.value; }
-    applyToTypeGroup(currentSelectedKey, function(e) { e.soldadura = val; });
-    updateSaveButton();
-  });
-  document.getElementById('sel-soldadura-otro').addEventListener('input', function() {
-    if (!currentSelectedKey) return;
-    var val = this.value;
-    applyToTypeGroup(currentSelectedKey, function(e) { e.soldadura = val; });
-    updateSaveButton();
-  });
-  document.getElementById('sel-close').addEventListener('click', function() {
-    hideSelectedInfo();
-  });
-
   function hideSelectedInfo() {
     clearTimeout(selInfoFadeTimer);
     clearTimeout(selInfoHideTimer);
     var info = document.getElementById('selected-info');
     info.style.opacity = '0';
     info.style.display = 'none';
-    document.getElementById('sel-apuntalado-block').style.display = 'none';
-    currentSelectedKey = null;
   }
 
   function renderLegend() {
@@ -1330,9 +1234,7 @@ function startApp() {
 
           var savedState = (saved[child.name] && typeof saved[child.name].state === 'number') ? saved[child.name].state : 0;
           var savedTs = (saved[child.name] && saved[child.name].ts) ? saved[child.name].ts : null;
-          var savedApuntalado = !!(saved[child.name] && saved[child.name].apuntalado);
-          var savedSoldadura = (saved[child.name] && saved[child.name].soldadura) || '';
-          meshStates[child.name] = { mesh: child, state: savedState, label: name, category: category, worldCenter: worldCenter, ts: savedTs, apuntalado: savedApuntalado, soldadura: savedSoldadura };
+          meshStates[child.name] = { mesh: child, state: savedState, label: name, category: category, worldCenter: worldCenter, ts: savedTs };
         }
       });
 
@@ -1353,8 +1255,6 @@ function startApp() {
           if (meshStates[k] && !dirtyKeys[k] && typeof data[k].state === 'number' && data[k].state !== meshStates[k].state) {
             meshStates[k].state = data[k].state;
             meshStates[k].ts = data[k].ts || meshStates[k].ts;
-            meshStates[k].apuntalado = !!data[k].apuntalado;
-            meshStates[k].soldadura = data[k].soldadura || '';
             changed = true;
           }
         });
@@ -1683,7 +1583,6 @@ function startApp() {
       espesor: document.getElementById('injerto-espesor').value.trim(),
       proceso: document.getElementById('injerto-proceso').value,
       electrodo: document.getElementById('injerto-electrodo').value.trim(),
-      turno: turnoLabels[parseInt(turnoSelect.value, 10)],
       ts: Date.now()
     };
 
@@ -1773,14 +1672,7 @@ function startApp() {
       dirtyKeys[picked.name] = true;
       renderCounts();
       updateSaveButton();
-
-      if (entry.state === 0) {
-        entry.apuntalado = false;
-        entry.soldadura = '';
-        showAutoFadeInfo(entry.label, cat.states[entry.state].name);
-      } else {
-        showInterventionForm(picked.name, entry, cat.states[entry.state].name);
-      }
+      showSelectedInfo(entry.label, cat.states[entry.state].name);
     }
   });
 
@@ -1795,13 +1687,11 @@ function startApp() {
   document.getElementById('btn-save').addEventListener('click', function() {
     var keys = Object.keys(dirtyKeys);
     if (keys.length === 0) return;
-    var turnoIdx = parseInt(turnoSelect.value, 10);
-    var turno = turnoLabels[turnoIdx];
     var nowTs = Date.now();
     var payload = {};
     keys.forEach(function(k) {
       var e = meshStates[k];
-      payload[k] = { state: e.state, category: e.category, turno: turno, turnoIdx: turnoIdx, ts: nowTs, apuntalado: !!e.apuntalado, soldadura: e.soldadura || '' };
+      payload[k] = { state: e.state, category: e.category, ts: nowTs };
     });
     var statusEl = document.getElementById('save-status');
     statusEl.textContent = 'Guardando...';
@@ -1816,22 +1706,75 @@ function startApp() {
   });
 
   // --- Modal de configuracion de pernos por codigo de placa ---
-  // Dimensiones reales de la pieza en mm. El bounding box de la geometria esta en espacio
-  // LOCAL (sin la escala acumulada de los nodos padre), por eso se multiplica por la escala
-  // real extraida de matrixWorld (ignorando la rotacion, para no distorsionar un bounding
-  // box alineado a ejes). Ademas la especificacion glTF define sus unidades siempre en
-  // metros, sin importar en que unidad se modelo originalmente en SolidWorks -- por eso se
-  // multiplica x1000 al final para pasar a mm.
-  function plateDimsMm(mesh) {
+  // Dimensiones reales de la pieza en mm, usando un bounding box ORIENTADO (no alineado a
+  // los ejes locales). Algunas piezas (ej. los lifters de Canaleta BN005) quedan exportadas
+  // con su geometria rotada dentro de su propio sistema de coordenadas local (en ese caso,
+  // ~30 grados, el mismo angulo de inclinacion del chute) -- un bounding box alineado a
+  // ejes mide en diagonal y da medidas infladas (se detecto asi: 132x128mm en vez de los
+  // 90x100mm reales medidos en terreno). Se resuelve calculando los 3 ejes principales
+  // reales de la pieza por PCA (autovectores de la matriz de covarianza de sus vertices,
+  // por iteracion de potencia + deflacion) y midiendo la extension a lo largo de esos ejes.
+  function pieceDimsMm(mesh) {
     var geo = mesh.geometry;
-    if (!geo.boundingBox) geo.computeBoundingBox();
-    var localSize = new THREE.Vector3();
-    geo.boundingBox.getSize(localSize);
+    var posAttr = geo.attributes.position;
+    var n = posAttr.count;
+    var mean = new THREE.Vector3();
+    for (var i = 0; i < n; i++) mean.add(new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)));
+    mean.divideScalar(n);
+
+    var cxx = 0, cxy = 0, cxz = 0, cyy = 0, cyz = 0, czz = 0;
+    for (var i2 = 0; i2 < n; i2++) {
+      var dx = posAttr.getX(i2) - mean.x, dy = posAttr.getY(i2) - mean.y, dz = posAttr.getZ(i2) - mean.z;
+      cxx += dx * dx; cxy += dx * dy; cxz += dx * dz;
+      cyy += dy * dy; cyz += dy * dz; czz += dz * dz;
+    }
+    function matVec(v) {
+      return new THREE.Vector3(
+        cxx * v.x + cxy * v.y + cxz * v.z,
+        cxy * v.x + cyy * v.y + cyz * v.z,
+        cxz * v.x + cyz * v.y + czz * v.z
+      );
+    }
+    function powerIteration(seed) {
+      var v = seed.clone().normalize();
+      for (var it = 0; it < 60; it++) {
+        var nv = matVec(v);
+        if (nv.lengthSq() < 1e-14) break;
+        v = nv.normalize();
+      }
+      return v;
+    }
+
+    var v1 = powerIteration(new THREE.Vector3(1, 0.37, 0.61));
+    var lambda1 = matVec(v1).dot(v1);
+    var seed2 = new THREE.Vector3(0.53, -0.71, 0.29);
+    seed2.addScaledVector(v1, -v1.dot(seed2));
+    var v2 = seed2.lengthSq() > 1e-10 ? seed2.normalize() : new THREE.Vector3(0, 1, 0);
+    for (var it2 = 0; it2 < 60; it2++) {
+      var nv2 = matVec(v2);
+      nv2.addScaledVector(v1, -lambda1 * v1.dot(v2)); // deflacion: descuenta la componente ya hallada
+      nv2.addScaledVector(v1, -v1.dot(nv2)); // refuerza ortogonalidad exacta contra v1
+      if (nv2.lengthSq() < 1e-14) break;
+      v2 = nv2.normalize();
+    }
+    var v3 = new THREE.Vector3().crossVectors(v1, v2).normalize();
+
+    var minA = Infinity, maxA = -Infinity, minB = Infinity, maxB = -Infinity, minC = Infinity, maxC = -Infinity;
+    for (var i3 = 0; i3 < n; i3++) {
+      var px = posAttr.getX(i3) - mean.x, py = posAttr.getY(i3) - mean.y, pz = posAttr.getZ(i3) - mean.z;
+      var a = px * v1.x + py * v1.y + pz * v1.z;
+      var b = px * v2.x + py * v2.y + pz * v2.z;
+      var c = px * v3.x + py * v3.y + pz * v3.z;
+      minA = Math.min(minA, a); maxA = Math.max(maxA, a);
+      minB = Math.min(minB, b); maxB = Math.max(maxB, b);
+      minC = Math.min(minC, c); maxC = Math.max(maxC, c);
+    }
+
     var worldScale = new THREE.Vector3();
     mesh.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), worldScale);
-    var realSizeMeters = localSize.multiply(worldScale);
-    return [Math.abs(realSizeMeters.x), Math.abs(realSizeMeters.y), Math.abs(realSizeMeters.z)]
-      .map(function(v) { return Math.round(v * 1000); })
+    var scale = (Math.abs(worldScale.x) + Math.abs(worldScale.y) + Math.abs(worldScale.z)) / 3;
+    return [(maxA - minA), (maxB - minB), (maxC - minC)]
+      .map(function(v) { return Math.round(v * scale * 1000); })
       .sort(function(a, b) { return b - a; });
   }
 
@@ -1853,28 +1796,38 @@ function startApp() {
   // fijos -- cada chute puede pedir datos distintos (ver CHUTES_CONFIG.pernosSchema).
   function buildPernosRow(code, groupInfo) {
     var cfg = pernosConfig[code] || {};
-    var dims = plateDimsMm(groupInfo.sample.mesh);
+    var dims = pieceDimsMm(groupInfo.sample.mesh);
     var catLabel = CATEGORIES[groupInfo.category].label;
     var row = document.createElement('div');
     row.className = 'pernos-row';
     row.dataset.code = code;
     row.dataset.dims = dims.join('x');
 
+    var thumb = document.createElement('img');
+    thumb.className = 'pernos-row-thumb';
+    thumb.alt = code;
+    thumb.src = snapshotPieceThumbnail(groupInfo.sample.mesh).dataUrl;
+    row.appendChild(thumb);
+
+    var content = document.createElement('div');
+    content.className = 'pernos-row-content';
+    row.appendChild(content);
+
     var title = document.createElement('div');
     title.className = 'pernos-row-title';
     title.innerHTML = '<strong>' + code + '</strong><span>' + catLabel + ' &middot; x' + groupInfo.count +
       ' en el chute &middot; placa aprox. ' + dims[0] + '&times;' + dims[1] + '&times;' + dims[2] + ' mm</span>';
-    row.appendChild(title);
+    content.appendChild(title);
 
     var grid = document.createElement('div');
     grid.className = 'pernos-grid';
-    row.appendChild(grid);
+    content.appendChild(grid);
 
     var checksWrap = document.createElement('div');
     checksWrap.className = 'pernos-checks';
-    row.appendChild(checksWrap);
+    content.appendChild(checksWrap);
 
-    var sistemaSelect = null, gradoSelect = null, iconCanvas = null;
+    var sistemaSelect = null, tipoCabezaSelect = null, gradoSelect = null, iconCanvas = null;
 
     var visibleFields = PERNOS_SCHEMA.filter(function(f) {
       return !(f.hideFor && f.hideFor.indexOf(groupInfo.category) !== -1);
@@ -1913,6 +1866,7 @@ function startApp() {
         sel.value = cfg[field.key] || sel.options[0].value;
         cell.appendChild(sel);
         if (field.key === 'sistema') sistemaSelect = sel;
+        if (field.key === 'tipoCabeza') tipoCabezaSelect = sel;
       } else if (field.type === 'number') {
         var numInput = document.createElement('input');
         numInput.type = 'number'; numInput.min = '0'; numInput.step = '1';
@@ -1938,7 +1892,7 @@ function startApp() {
         canvas.width = 34; canvas.height = 34; canvas.className = 'pf-icon';
         var iconLbl = document.createElement('span');
         iconLbl.style.cssText = 'font-size:10.5px;color:#888;';
-        iconLbl.textContent = 'Marca de cabeza';
+        iconLbl.textContent = 'Cabeza + grado';
         iconCell.appendChild(canvas); iconCell.appendChild(iconLbl);
         grid.appendChild(iconCell);
         iconCanvas = canvas;
@@ -1947,6 +1901,10 @@ function startApp() {
     });
 
     if (gradoSelect) {
+      var refreshIcon = function() {
+        if (!iconCanvas) return;
+        drawBoltHeadGradeIcon(iconCanvas, tipoCabezaSelect ? tipoCabezaSelect.value : '', sistemaSelect ? sistemaSelect.value : 'imperial', gradoSelect.value);
+      };
       var refreshGradoOptions = function(selected) {
         var sistemaVal = sistemaSelect ? sistemaSelect.value : 'imperial';
         var opts = sistemaVal === 'metrico'
@@ -1954,14 +1912,12 @@ function startApp() {
           : ['Grado 2', 'Grado 5', 'Grado 8', 'Otro'];
         gradoSelect.innerHTML = opts.map(function(o) { return '<option value="' + o + '">' + o + '</option>'; }).join('');
         if (selected && opts.indexOf(selected) !== -1) gradoSelect.value = selected;
-        if (iconCanvas) drawBoltGradeIcon(iconCanvas, sistemaVal, gradoSelect.value);
+        refreshIcon();
       };
       refreshGradoOptions(cfg.grado);
       if (sistemaSelect) sistemaSelect.addEventListener('change', function() { refreshGradoOptions(); });
-      var iconCanvasRef = iconCanvas;
-      gradoSelect.addEventListener('change', function() {
-        if (iconCanvasRef) drawBoltGradeIcon(iconCanvasRef, sistemaSelect ? sistemaSelect.value : 'imperial', gradoSelect.value);
-      });
+      if (tipoCabezaSelect) tipoCabezaSelect.addEventListener('change', refreshIcon);
+      gradoSelect.addEventListener('change', refreshIcon);
     }
 
     return row;
@@ -2011,20 +1967,6 @@ function startApp() {
       statusEl.textContent = 'Error al guardar: ' + err.message;
     });
   });
-
-  var turnoLabels = [];
-  try {
-    var turnosParam = urlParams.get('turnos');
-    if (turnosParam) turnoLabels = JSON.parse(decodeURIComponent(turnosParam));
-  } catch (e) { turnoLabels = []; }
-  if (turnoLabels.length === 0) turnoLabels = ['Sin turno definido'];
-  var turnoActualIdx = parseInt(urlParams.get('turnoActual'), 10);
-  if (isNaN(turnoActualIdx) || turnoActualIdx < 0 || turnoActualIdx >= turnoLabels.length) turnoActualIdx = turnoLabels.length - 1;
-
-  var turnoSelect = document.getElementById('turno-input');
-  turnoSelect.innerHTML = turnoLabels.map(function(lbl, i) {
-    return '<option value="' + i + '"' + (i === turnoActualIdx ? ' selected' : '') + '>' + lbl + '</option>';
-  }).join('');
 
   var gapInput = document.getElementById('gap-input');
   var savedGap = localStorage.getItem('chute_gap');
@@ -2157,34 +2099,79 @@ function startApp() {
     return { dataUrl: dataUrl, aspect: aspect };
   }
 
-  // Vista isometrica de un tipo de placa (todas las piezas con el mismo codigo), para el
-  // bloque de especificaciones de pernos del informe: encuadra la camara en su bounding
-  // box y atenua el resto del modelo para que se lea claro cual es la pieza referenciada.
-  function snapshotPlateType(code) {
-    var keys = Object.keys(meshStates).filter(function(k) { return getPlateCode(meshStates[k].label) === code; });
-    if (keys.length === 0) return { dataUrl: null, aspect: 1.3 };
-
-    var box = new THREE.Box3();
-    keys.forEach(function(k) { box.expandByObject(meshStates[k].mesh); });
+  // Miniatura aislada de UNA sola pieza (no de todas las instancias del mismo codigo --
+  // esas pueden estar dispersas por todo el chute, lo que antes daba una foto del chute
+  // completo en vez de un acercamiento real a la pieza). Oculta todo lo demas (piezas,
+  // flechas de flujo, injertos) y encuadra la camara ceñida al bounding box de esa unica
+  // pieza. Se usa tanto en el modal "Configurar pernos" como en el informe PDF.
+  function snapshotPieceThumbnail(mesh) {
+    var box = new THREE.Box3().setFromObject(mesh);
     var center = box.getCenter(new THREE.Vector3());
     var size = box.getSize(new THREE.Vector3()).length() || 1;
 
-    var savedOpacity = {}, savedTransparent = {};
+    var savedVisible = {};
     Object.keys(meshStates).forEach(function(k) {
       var e = meshStates[k];
-      savedOpacity[k] = e.mesh.material.opacity;
-      savedTransparent[k] = e.mesh.material.transparent;
-      var show = keys.indexOf(k) !== -1;
-      e.mesh.material.transparent = true;
-      e.mesh.material.opacity = show ? 1 : 0.04;
+      savedVisible[k] = e.mesh.visible;
+      e.mesh.visible = (e.mesh === mesh);
     });
+    var flowGroups = flowMarkers.concat(entryMarkers);
+    var savedFlowVisible = flowGroups.map(function(p) { return p.front.visible; });
+    flowGroups.forEach(function(p) { p.front.visible = false; p.ghost.visible = false; });
+    var patchIds = Object.keys(patches);
+    var savedPatchVisible = patchIds.map(function(id) { return patches[id].mesh.visible; });
+    patchIds.forEach(function(id) { patches[id].mesh.visible = false; });
 
     var savedTarget = target.clone();
     var savedTheta = spherical.theta, savedPhi = spherical.phi, savedRadius = spherical.radius;
     target.copy(center);
     spherical.theta = Math.PI / 4;
     spherical.phi = Math.PI / 3;
-    spherical.radius = size * 1.6;
+    spherical.radius = size * 1.7;
+    updateCameraFromSpherical();
+
+    var result = captureAtAspect(1.2, function() {
+      renderer.render(scene, camera);
+      return renderer.domElement.toDataURL('image/png');
+    });
+
+    Object.keys(meshStates).forEach(function(k) { meshStates[k].mesh.visible = savedVisible[k]; });
+    flowGroups.forEach(function(p, i) { p.front.visible = savedFlowVisible[i]; p.ghost.visible = savedFlowVisible[i]; });
+    patchIds.forEach(function(id, i) { patches[id].mesh.visible = savedPatchVisible[i]; });
+    target.copy(savedTarget);
+    spherical.theta = savedTheta; spherical.phi = savedPhi; spherical.radius = savedRadius;
+    updateCameraFromSpherical();
+    renderer.render(scene, camera);
+    return result;
+  }
+
+  // Miniatura de un injerto para el informe: mantiene visible la pieza de estructura donde
+  // esta anclado (para que se entienda su ubicacion real) y el parche, oculta todo lo demas.
+  function snapshotInjertoThumbnail(patchMesh, hostMesh) {
+    var box = new THREE.Box3().setFromObject(patchMesh);
+    if (hostMesh) box.expandByObject(hostMesh);
+    var center = box.getCenter(new THREE.Vector3());
+    var size = box.getSize(new THREE.Vector3()).length() || 1;
+
+    var savedVisible = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      savedVisible[k] = e.mesh.visible;
+      e.mesh.visible = (hostMesh ? e.mesh === hostMesh : false);
+    });
+    var flowGroups = flowMarkers.concat(entryMarkers);
+    var savedFlowVisible = flowGroups.map(function(p) { return p.front.visible; });
+    flowGroups.forEach(function(p) { p.front.visible = false; p.ghost.visible = false; });
+    var patchIds = Object.keys(patches);
+    var savedPatchVisible = patchIds.map(function(id) { return patches[id].mesh.visible; });
+    patchIds.forEach(function(id) { patches[id].mesh.visible = (patches[id].mesh === patchMesh); });
+
+    var savedTarget = target.clone();
+    var savedTheta = spherical.theta, savedPhi = spherical.phi, savedRadius = spherical.radius;
+    target.copy(center);
+    spherical.theta = Math.PI / 4;
+    spherical.phi = Math.PI / 3;
+    spherical.radius = size * 1.9;
     updateCameraFromSpherical();
 
     var result = captureAtAspect(1.3, function() {
@@ -2192,16 +2179,84 @@ function startApp() {
       return renderer.domElement.toDataURL('image/png');
     });
 
-    Object.keys(meshStates).forEach(function(k) {
-      var e = meshStates[k];
-      e.mesh.material.opacity = savedOpacity[k];
-      e.mesh.material.transparent = savedTransparent[k];
-    });
+    Object.keys(meshStates).forEach(function(k) { meshStates[k].mesh.visible = savedVisible[k]; });
+    flowGroups.forEach(function(p, i) { p.front.visible = savedFlowVisible[i]; p.ghost.visible = savedFlowVisible[i]; });
+    patchIds.forEach(function(id, i) { patches[id].mesh.visible = savedPatchVisible[i]; });
     target.copy(savedTarget);
     spherical.theta = savedTheta; spherical.phi = savedPhi; spherical.radius = savedRadius;
     updateCameraFromSpherical();
     renderer.render(scene, camera);
     return result;
+  }
+
+  // Vista isometrica del chute COMPLETO con todas las piezas a color real de estado (sin
+  // atenuar por categoria activa, para que se vean placas/lifters/estructura a la vez), mas
+  // las posiciones en pantalla (0..1) de cada tipo de pieza distinto que tuvo algun cambio,
+  // proyectadas con la misma camara usada para la captura -- para poder dibujar etiquetas
+  // con lineas guia sobre la imagen en el PDF.
+  function snapshotFullChuteWithLabels() {
+    if (!modelBox) return null;
+    var center = modelBox.getCenter(new THREE.Vector3());
+    var size = modelBox.getSize(new THREE.Vector3()).length() || 1;
+
+    var savedOpacity = {}, savedTransparent = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      savedOpacity[k] = e.mesh.material.opacity;
+      savedTransparent[k] = e.mesh.material.transparent;
+      e.mesh.material.transparent = false;
+      e.mesh.material.opacity = 1;
+    });
+    var patchIds = Object.keys(patches);
+    var savedPatchVisible = patchIds.map(function(id) { return patches[id].mesh.visible; });
+    patchIds.forEach(function(id) { patches[id].mesh.visible = false; });
+
+    var savedTarget = target.clone();
+    var savedTheta = spherical.theta, savedPhi = spherical.phi, savedRadius = spherical.radius;
+    target.copy(center);
+    spherical.theta = defaultSpherical.theta;
+    spherical.phi = defaultSpherical.phi;
+    spherical.radius = size * 1.15;
+    updateCameraFromSpherical();
+
+    var aspect = 1.7;
+    var result = captureAtAspect(aspect, function() {
+      renderer.render(scene, camera);
+      return renderer.domElement.toDataURL('image/png');
+    });
+
+    // Un representante por codigo distinto que tuvo cambios, proyectado a coordenadas de
+    // pantalla (0..1) con la camara que se acaba de usar para la foto.
+    var groups = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      if (CATEGORIES[e.category].mode !== 'estado' || e.state === 0) return;
+      var code = getPlateCode(e.label);
+      if (!groups[code]) groups[code] = { code: code, category: e.category, worldCenter: e.worldCenter, state: e.state };
+    });
+    var labels = Object.keys(groups).sort().map(function(code) {
+      var g = groups[code];
+      var proj = g.worldCenter.clone().project(camera);
+      return {
+        code: code, category: g.category,
+        stateName: CATEGORIES[g.category].states[g.state].name,
+        pdfColor: CATEGORIES[g.category].states[g.state].pdfColor,
+        u: proj.x * 0.5 + 0.5, v: -proj.y * 0.5 + 0.5, onScreen: proj.z < 1
+      };
+    });
+
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      e.mesh.material.opacity = savedOpacity[k];
+      e.mesh.material.transparent = savedTransparent[k];
+    });
+    patchIds.forEach(function(id, i) { patches[id].mesh.visible = savedPatchVisible[i]; });
+    target.copy(savedTarget);
+    spherical.theta = savedTheta; spherical.phi = savedPhi; spherical.radius = savedRadius;
+    updateCameraFromSpherical();
+    renderer.render(scene, camera);
+
+    return { dataUrl: result.dataUrl, aspect: aspect, labels: labels };
   }
 
   function generatePdfReport() {
@@ -2211,8 +2266,6 @@ function startApp() {
     var statusEl = document.getElementById('save-status');
     statusEl.textContent = 'Generando informe, un momento...';
 
-    var turnoIdx = parseInt(turnoSelect.value, 10);
-    var turnoTxt = turnoLabels[turnoIdx];
     var gapVal = gapInput.value || 'No especificado';
 
     // --- Colores del tema (mismos que la app) ---
@@ -2344,20 +2397,22 @@ function startApp() {
     doc.setTextColor(0, 0, 0);
     y = 58;
 
+    var showGap = !!currentChute.showGap;
+    var boxH = showGap ? 32 : 24;
     doc.setFillColor.apply(doc, C_BG);
-    doc.roundedRect(margin, y, contentW, 32, 2, 2, 'F');
+    doc.roundedRect(margin, y, contentW, boxH, 2, 2, 'F');
     doc.setFontSize(9.5);
     doc.setFont(undefined, 'bold');
     doc.text('OT / Actividad', margin + 6, y + 8);
     doc.text('Modificaciones realizadas', margin + 6, y + 16);
-    doc.text('G.A.P. placa guia - correa', margin + 6, y + 24);
+    if (showGap) doc.text('G.A.P. placa guia - correa', margin + 6, y + 24);
     doc.setFont(undefined, 'normal');
     var otTexto = (OT_NUMERO || OT_NOMBRE) ? (OT_NUMERO + '  -  ' + OT_NOMBRE) : 'No especificado';
     var otLine = doc.splitTextToSize(otTexto, contentW - 60);
     doc.text(otLine, margin + 55, y + 8);
     doc.text(rangoFechas, margin + 55, y + 16);
-    doc.text(gapVal, margin + 55, y + 24);
-    y += 42;
+    if (showGap) doc.text(gapVal, margin + 55, y + 24);
+    y += boxH + 10;
 
     sectionHeader('Resumen ejecutivo');
     var splitConclusion = doc.splitTextToSize(conclusion, contentW);
@@ -2458,6 +2513,104 @@ function startApp() {
       y += 4;
     }
 
+    // ================= RESUMEN VISUAL (una sola imagen con todos los cambios) =================
+    // Una vista isometrica del chute completo (todas las categorias a color real de estado a
+    // la vez), con etiquetas por cada tipo distinto de placa/lifter/estructura que tuvo algun
+    // cambio, leyenda de colores y un cuadro de conteos -- todo en una sola hoja.
+    function changesOverviewSection() {
+      var overview = snapshotFullChuteWithLabels();
+      if (!overview || !overview.dataUrl) return;
+
+      newPage();
+      sectionHeader('Resumen visual de cambios');
+
+      var imgW = contentW;
+      var imgH = imgW / overview.aspect;
+      var maxImgH = pageH - 16 - y - 48; // deja espacio para leyenda + conteos en la misma hoja
+      if (imgH > maxImgH) { imgH = maxImgH; imgW = imgH * overview.aspect; }
+      var imgX = margin + (contentW - imgW) / 2;
+      var imgY = y;
+
+      doc.setDrawColor.apply(doc, C_LINE);
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(imgX, imgY, imgW, imgH, 1, 1, 'FD');
+      doc.addImage(overview.dataUrl, 'PNG', imgX, imgY, imgW, imgH);
+
+      var offsets = [[16, -10], [16, 10], [-16, -10], [-16, 10], [22, 0], [-22, 0], [0, -14], [0, 14]];
+      overview.labels.forEach(function(lbl, i) {
+        if (!lbl.onScreen) return;
+        var px = imgX + lbl.u * imgW, py = imgY + lbl.v * imgH;
+        if (px < imgX || px > imgX + imgW || py < imgY || py > imgY + imgH) return;
+        var off = offsets[i % offsets.length];
+        var lx = Math.max(imgX + 4, Math.min(imgX + imgW - 4, px + off[0]));
+        var ly = Math.max(imgY + 4, Math.min(imgY + imgH - 4, py + off[1]));
+
+        var color = PDF_COLOR_MAP[lbl.pdfColor] || C_STEEL;
+        doc.setDrawColor.apply(doc, C_DARK);
+        doc.setLineWidth(0.3);
+        doc.line(px, py, lx, ly);
+        doc.setFillColor.apply(doc, color);
+        doc.circle(px, py, 1, 'F');
+
+        doc.setFontSize(7);
+        doc.setFont(undefined, 'bold');
+        var textW2 = doc.getTextWidth(lbl.code) + 3;
+        var boxX = off[0] < 0 ? lx - textW2 : lx;
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(boxX, ly - 2.6, textW2, 5, 0.6, 0.6, 'F');
+        doc.setTextColor.apply(doc, C_DARK);
+        doc.text(lbl.code, boxX + 1.5, ly + 0.8);
+      });
+      doc.setTextColor(0, 0, 0);
+      y = imgY + imgH + 8;
+
+      // Leyenda combinada de todas las categorias en modo estado.
+      ensureSpace(12);
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor.apply(doc, C_DARK);
+      doc.text('Leyenda', margin, y);
+      y += 5;
+      var legendX = margin;
+      ESTADO_CATEGORIES.forEach(function(catKey) {
+        CATEGORIES[catKey].states.forEach(function(s) {
+          var color = PDF_COLOR_MAP[s.pdfColor] || C_STEEL;
+          if (legendX + 40 > margin + contentW) { legendX = margin; y += 6; }
+          doc.setFillColor.apply(doc, color);
+          doc.rect(legendX, y - 3, 3.2, 3.2, 'F');
+          doc.setFontSize(8);
+          doc.setFont(undefined, 'normal');
+          doc.setTextColor(60, 60, 60);
+          doc.text(s.name, legendX + 5, y - 0.3);
+          legendX += doc.getTextWidth(s.name) + 14;
+        });
+      });
+      doc.setTextColor(0, 0, 0);
+      y += 9;
+
+      // Cuadro de conteos por categoria.
+      ensureSpace(5 * ESTADO_CATEGORIES.length + 8);
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor.apply(doc, C_DARK);
+      doc.text('Cambios', margin, y);
+      y += 5;
+      doc.setFontSize(8.5);
+      doc.setFont(undefined, 'normal');
+      ESTADO_CATEGORIES.forEach(function(catKey) {
+        var counts = countsByCategory[catKey];
+        var total = Object.keys(meshStates).filter(function(k) { return meshStates[k].category === catKey; }).length;
+        var line = CATEGORIES[catKey].label + ':  ' +
+          CATEGORIES[catKey].states.map(function(s) { return s.name + ' ' + (counts[s.name] || 0); }).join('   ·   ') +
+          '   (de ' + total + ')';
+        doc.setTextColor(60, 60, 60);
+        doc.text(line, margin, y);
+        y += 5;
+      });
+      doc.setTextColor(0, 0, 0);
+    }
+    changesOverviewSection();
+
     newPage();
     sectionHeader('Detalle completo de cambios');
     ESTADO_CATEGORIES.forEach(function(catKey) { detailList(catKey, CATEGORIES[catKey]); });
@@ -2507,7 +2660,7 @@ function startApp() {
       codes.forEach(function(code) {
         var g = groups[code];
         var cfg = pernosConfig[code];
-        var img = snapshotPlateType(code);
+        var img = snapshotPieceThumbnail(g.sample.mesh);
         var imgW = contentW * 0.42;
         var imgH = imgW / (img.aspect || 1.3);
 
@@ -2520,10 +2673,11 @@ function startApp() {
         // el valor -- antes era un offset fijo que no alcanzaba para las mas largas).
         doc.setFontSize(9);
         doc.setFont(undefined, 'bold');
-        var allLabels = ['Dimension placa', 'Apuntalamiento'].concat(schemaFields.map(function(f) { return f.label; }));
+        var allLabels = ['Dimension placa'].concat(schemaFields.map(function(f) { return f.label; }));
         var labelW = Math.max.apply(null, allLabels.map(function(l) { return doc.getTextWidth(l + ':'); })) + 4;
 
-        ensureSpace(Math.max(imgH, 46) + 14);
+        ensureSpace(Math.max(imgH, 46) + 18);
+        var borderTop = y - 3;
 
         doc.setFontSize(10.5);
         doc.setFont(undefined, 'bold');
@@ -2542,7 +2696,7 @@ function startApp() {
           doc.addImage(img.dataUrl, 'PNG', margin, blockTop, imgW, imgH);
         }
 
-        var dims = plateDimsMm(g.sample.mesh);
+        var dims = pieceDimsMm(g.sample.mesh);
         doc.setFontSize(9);
         doc.setFont(undefined, 'normal');
         doc.setTextColor(0, 0, 0);
@@ -2574,32 +2728,12 @@ function startApp() {
             var val = cfg[field.key];
             if (field.type === 'checkbox') { specLine(field.label, null, { checkbox: !!val }); return; }
             if (field.type === 'grado') {
-              var gradeIcon = iconToDataUrl(function(c) { drawBoltGradeIcon(c, cfg.sistema, val); });
-              specLine(field.label, (val || '-') + ' (' + (cfg.sistema === 'metrico' ? 'metrico' : 'imperial') + ')', { iconDataUrl: gradeIcon });
-              return;
-            }
-            if (field.key === 'tipoCabeza') {
-              var headIcon = iconToDataUrl(function(c) { drawBoltHeadTypeIcon(c, val); });
-              specLine(field.label, val || '-', { iconDataUrl: headIcon });
+              var icon = iconToDataUrl(function(c) { drawBoltHeadGradeIcon(c, cfg.tipoCabeza, cfg.sistema, val); });
+              specLine(field.label, (val || '-') + ' (' + (cfg.sistema === 'metrico' ? 'metrico' : 'imperial') + ')', { iconDataUrl: icon });
               return;
             }
             specLine(field.label, (val != null && val !== '') ? val : '-');
           });
-
-          var intervenidas = Object.keys(meshStates).filter(function(k) {
-            return getPlateCode(meshStates[k].label) === code && meshStates[k].state !== 0;
-          });
-          if (intervenidas.length > 0) {
-            var apuntaladas = intervenidas.filter(function(k) { return meshStates[k].apuntalado; });
-            var soldaduras = {};
-            apuntaladas.forEach(function(k) {
-              var s = meshStates[k].soldadura || 'Sin especificar';
-              soldaduras[s] = (soldaduras[s] || 0) + 1;
-            });
-            var soldTxt = Object.keys(soldaduras).map(function(s) { return s + ' (' + soldaduras[s] + ')'; }).join(', ') || 'Ninguna';
-            var todasApuntaladas = apuntaladas.length === intervenidas.length;
-            specLine('Apuntalamiento', (todasApuntaladas ? 'Si' : (apuntaladas.length === 0 ? 'No' : 'Parcial')) + ' -- Soldadura: ' + soldTxt);
-          }
         } else {
           doc.setTextColor(180, 90, 50);
           doc.text('Sin especificacion de pernos registrada para este codigo (usar "Configurar pernos" en la app).', textX, ty, { maxWidth: textW });
@@ -2607,10 +2741,92 @@ function startApp() {
           ty += 5;
         }
 
-        y = blockTop + Math.max(imgH, ty - blockTop) + 10;
+        var blockBottom = blockTop + Math.max(imgH, ty - blockTop);
+        doc.setDrawColor.apply(doc, C_RED);
+        doc.setLineWidth(0.5);
+        doc.roundedRect(margin - 4, borderTop, contentW + 8, (blockBottom + 4) - borderTop, 2, 2, 'D');
+        doc.setDrawColor(0, 0, 0);
+        y = blockBottom + 14;
       });
     }
     pernosSection();
+
+    // ================= INJERTOS =================
+    function injertosSection() {
+      var patchIds = Object.keys(patches);
+      if (patchIds.length === 0) return;
+
+      newPage();
+      sectionHeader('Injertos en estructura');
+
+      var idx = 0;
+      patchIds.forEach(function(id) {
+        idx++;
+        var data = patches[id].data;
+        var patchMesh = patches[id].mesh;
+        var hostEntry = meshStates[data.meshKey];
+        var hostMesh = hostEntry ? hostEntry.mesh : null;
+        var hostLabel = hostEntry ? hostEntry.label : (data.meshKey || 'Estructura');
+
+        var img = snapshotInjertoThumbnail(patchMesh, hostMesh);
+        var imgW = contentW * 0.42;
+        var imgH = imgW / (img.aspect || 1.3);
+
+        var segLine = (data.segmentDims || []).map(function(s) { return s.seg + ': ' + s.mm + 'mm'; }).join('   ');
+        var allLabels = ['Ubicacion', 'Vertices', 'Segmentos', 'Espesor', 'Proceso de soldadura', 'Electrodo', 'Fecha'];
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'bold');
+        var labelW = Math.max.apply(null, allLabels.map(function(l) { return doc.getTextWidth(l + ':'); })) + 4;
+
+        ensureSpace(Math.max(imgH, 50) + 18);
+        var borderTop = y - 3;
+
+        doc.setFontSize(10.5);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor.apply(doc, C_DARK);
+        doc.text('Injerto ' + idx, margin, y);
+        y += 5;
+
+        var blockTop = y;
+        var textX = margin + imgW + 8;
+        var textW = contentW - imgW - 8;
+
+        if (img.dataUrl) {
+          doc.setDrawColor.apply(doc, C_LINE);
+          doc.setFillColor(255, 255, 255);
+          doc.roundedRect(margin, blockTop, imgW, imgH, 1, 1, 'FD');
+          doc.addImage(img.dataUrl, 'PNG', margin, blockTop, imgW, imgH);
+        }
+
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(0, 0, 0);
+        var ty = blockTop + 4;
+        function specLine(lbl, val) {
+          doc.setFont(undefined, 'bold');
+          doc.text(lbl + ':', textX, ty);
+          doc.setFont(undefined, 'normal');
+          var wrapped = doc.splitTextToSize(String(val), textW - labelW);
+          doc.text(wrapped, textX + labelW, ty);
+          ty += Math.max(wrapped.length * 4.6, 5);
+        }
+        specLine('Ubicacion', hostLabel);
+        specLine('Vertices', (data.vertexLabels || []).join(', ') || '-');
+        specLine('Segmentos', segLine || '-');
+        specLine('Espesor', data.espesor || '-');
+        specLine('Proceso de soldadura', data.proceso || '-');
+        specLine('Electrodo', data.electrodo || '-');
+        specLine('Fecha', data.ts ? new Date(data.ts).toLocaleDateString() : '-');
+
+        var blockBottom = blockTop + Math.max(imgH, ty - blockTop);
+        doc.setDrawColor.apply(doc, C_RED);
+        doc.setLineWidth(0.5);
+        doc.roundedRect(margin - 4, borderTop, contentW + 8, (blockBottom + 4) - borderTop, 2, 2, 'D');
+        doc.setDrawColor(0, 0, 0);
+        y = blockBottom + 14;
+      });
+    }
+    injertosSection();
 
     drawFooter();
     doc.save('informe_' + chuteId + '_' + Date.now() + '.pdf');
