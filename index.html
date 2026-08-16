@@ -4,10 +4,41 @@
 <meta charset="UTF-8">
 <title>Chute CV-201 - Inspeccion</title>
 <style>
-  html, body { margin:0; padding:0; height:100%; overflow:hidden; font-family: -apple-system, Arial, sans-serif; background:#f1efe8; }
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; font-family: -apple-system, Arial, sans-serif; background:#eef1f4; }
   #canvas-container { width:100%; height:100%; touch-action:none; }
+  #btn-menu {
+    position:fixed; top:12px; left:12px; z-index:20;
+    width:40px; height:40px; border-radius:10px; border:none;
+    background:rgba(44,44,42,0.92); color:#fff; font-size:18px; line-height:1; cursor:pointer;
+    box-shadow:0 2px 8px rgba(0,0,0,0.18);
+    display:flex; align-items:center; justify-content:center;
+  }
+  #chute-menu-overlay {
+    position:fixed; inset:0; z-index:24; background:rgba(20,20,18,0.25);
+    opacity:0; pointer-events:none; transition:opacity 0.25s ease;
+  }
+  #chute-menu-overlay.open { opacity:1; pointer-events:auto; }
+  #chute-menu {
+    position:fixed; top:0; left:0; height:100%; width:270px; z-index:25;
+    background:rgba(44,44,42,0.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    color:#fff; padding:22px 16px; box-sizing:border-box;
+    transform:translateX(-100%); transition:transform 0.28s ease;
+    box-shadow:2px 0 20px rgba(0,0,0,0.25);
+  }
+  #chute-menu.open { transform:translateX(0); }
+  #chute-menu h4 {
+    margin:0 0 10px; font-size:12px; letter-spacing:0.04em; text-transform:uppercase;
+    color:rgba(255,255,255,0.55); font-weight:600;
+  }
+  .chute-menu-item {
+    display:block; width:100%; text-align:left; padding:10px 12px; margin-top:8px;
+    border-radius:8px; border:1px solid rgba(255,255,255,0.16); background:rgba(255,255,255,0.07);
+    color:#fff; font-size:13px; cursor:pointer; box-sizing:border-box;
+  }
+  .chute-menu-item:hover { background:rgba(255,255,255,0.15); }
+  .chute-menu-item.active { background:rgba(255,255,255,0.94); color:#2C2C2A; font-weight:600; border-color:transparent; }
   #ui {
-    position:fixed; top:12px; left:12px; z-index:10;
+    position:fixed; top:60px; left:12px; z-index:10;
     background:rgba(255,255,255,0.94); border-radius:10px; padding:12px 16px;
     box-shadow:0 2px 8px rgba(0,0,0,0.12); max-width:290px;
   }
@@ -26,7 +57,7 @@
     position:fixed; top:12px; right:12px; z-index:10;
     background:rgba(255,255,255,0.94); border-radius:10px; padding:12px 16px;
     box-shadow:0 2px 8px rgba(0,0,0,0.12); font-size:13px; color:#2C2C2A;
-    min-width:200px; display:none;
+    min-width:200px; display:none; opacity:0; transition:opacity 0.4s ease;
   }
   #selected-info strong { display:block; margin-bottom:6px; font-size:14px; }
   #loading {
@@ -39,22 +70,117 @@
   #save-status { font-size:11px; color:#888; margin-top:6px; text-align:center; min-height:14px; }
   #turno-input { width:100%; padding:6px; font-size:12px; border-radius:6px; border:1px solid #ccc; margin-top:8px; box-sizing:border-box; }
   #turno-label { font-size:11px; color:#888; margin-top:8px; display:block; }
-  .type-label {
-    position:absolute; z-index:15; pointer-events:none;
-    background:rgba(255,255,255,0.95); color:#2C2C2A; font-size:11px; font-weight:600; padding:4px 8px;
-    border-radius:5px; white-space:nowrap; transform:translate(-50%, -50%);
-    border:1px solid #2C2C2A; box-shadow:0 1px 4px rgba(0,0,0,0.15);
+
+  /* --- Info de pieza seleccionada: bloque de apuntalamiento (solo si hubo intervencion) --- */
+  #sel-apuntalado-block { margin-top:10px; padding-top:10px; border-top:1px solid #e5e3dd; }
+  #sel-apuntalado-block label { display:flex; align-items:center; gap:6px; font-size:12px; color:#444; cursor:pointer; }
+  #sel-soldadura-wrap { margin-top:6px; }
+  #sel-soldadura-wrap select, #sel-soldadura-wrap input {
+    width:100%; padding:5px; font-size:12px; border-radius:6px; border:1px solid #ccc; box-sizing:border-box; margin-top:3px;
   }
+  #sel-close { margin-top:10px; width:100%; padding:6px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:11px; color:#666; }
+
+  /* --- Modal de configuracion de pernos --- */
+  .modal-overlay {
+    position:fixed; inset:0; z-index:30; background:rgba(20,20,18,0.45);
+    display:none; align-items:center; justify-content:center; padding:24px; box-sizing:border-box;
+  }
+  .modal-overlay.open { display:flex; }
+  .modal-panel {
+    background:#fff; border-radius:12px; max-width:720px; width:100%; max-height:88vh;
+    display:flex; flex-direction:column; box-shadow:0 12px 40px rgba(0,0,0,0.3); overflow:hidden;
+  }
+  .modal-header { padding:16px 20px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:space-between; }
+  .modal-header h3 { margin:0; font-size:15px; color:#2C2C2A; }
+  .modal-header p { margin:4px 0 0; font-size:11.5px; color:#888; }
+  .modal-close { border:none; background:none; font-size:20px; color:#999; cursor:pointer; line-height:1; padding:2px 6px; }
+  .modal-body { padding:16px 20px; overflow-y:auto; }
+  .modal-footer { padding:12px 20px; border-top:1px solid #eee; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .pernos-row { border:1px solid #e5e3dd; border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+  .pernos-row-title { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .pernos-row-title strong { font-size:13px; color:#2C2C2A; }
+  .pernos-row-title span { font-size:11px; color:#888; }
+  .pernos-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 10px; }
+  .pernos-grid label { font-size:10.5px; color:#777; display:block; }
+  .pernos-grid select, .pernos-grid input {
+    width:100%; padding:5px 6px; font-size:12px; border-radius:6px; border:1px solid #ccc; box-sizing:border-box; margin-top:2px;
+  }
+  .pernos-checks { display:flex; gap:16px; margin-top:8px; }
+  .pernos-checks label { display:flex; align-items:center; gap:5px; font-size:11.5px; color:#555; }
+  .grade-icon-wrap { display:flex; align-items:center; gap:6px; margin-top:6px; }
+  .grade-icon-wrap canvas { border-radius:4px; }
+  #btn-pernos-guardar { background:#2C2C2A; color:#fff; border:1px solid #2C2C2A; font-weight:600; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:12px; }
+  #pernos-save-status { font-size:11px; color:#888; }
+
+  /* --- Portada de seleccion de chutes --- */
+  #chute-cover {
+    position:fixed; inset:0; z-index:15; overflow-y:auto; display:none;
+    background:linear-gradient(180deg, #eef2f6 0%, #dde3e9 55%, #b7c0c9 100%);
+  }
+  #chute-cover.open { display:block; }
+  #chute-cover-inner { max-width:900px; margin:0 auto; padding:15vh 24px 40px; box-sizing:border-box; min-height:100%; }
+  #chute-cover-inner h1 { font-size:22px; color:#2C2C2A; margin:0 0 28px; text-align:center; font-weight:700; }
+  #chute-cover-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:20px; }
+  .chute-card {
+    background:#fff; border-radius:14px; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.14);
+    display:flex; flex-direction:column;
+  }
+  .chute-card img { width:100%; aspect-ratio:4/3; object-fit:cover; display:block; background:#eef2f6; }
+  .chute-card-btn {
+    border:none; background:#2C2C2A; color:#fff; font-weight:600; font-size:13.5px;
+    padding:14px 12px; cursor:pointer; text-align:center;
+  }
+  .chute-card-btn:hover { background:#454542; }
+
+  /* --- Editor de injertos (parches soldados sobre estructura) --- */
+  #injerto-draw-canvas { border:1px solid #ddd; border-radius:8px; background:#f7f6f2; touch-action:none; display:block; margin:0 auto; }
+  #injerto-draw-hint { font-size:11.5px; color:#888; text-align:center; margin-top:8px; }
+  .injerto-seg-row { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#444; margin:5px 0; }
+  .injerto-seg-row span { min-width:52px; font-weight:600; color:#2C2C2A; }
+  .injerto-seg-row input { flex:1; padding:5px 6px; font-size:12px; border-radius:6px; border:1px solid #ccc; box-sizing:border-box; }
+  .injerto-field { margin-top:10px; }
+  .injerto-field label { display:block; font-size:10.5px; color:#777; margin-bottom:3px; }
+  .injerto-field select, .injerto-field input {
+    width:100%; padding:6px; font-size:12px; border-radius:6px; border:1px solid #ccc; box-sizing:border-box;
+  }
+  #btn-injerto-undo, #btn-injerto-restart { padding:6px 10px; font-size:11.5px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; }
+  #btn-injerto-crear { background:#2C2C2A; color:#fff; border:1px solid #2C2C2A; font-weight:600; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:12px; }
+  #btn-injerto-crear:disabled { background:#ccc; border-color:#ccc; cursor:default; }
+  #injerto-save-status { font-size:11px; color:#888; }
+
+  #injerto-delete-badge {
+    position:fixed; z-index:22; width:22px; height:22px; border-radius:50%;
+    background:#E24B4A; color:#fff; border:2px solid #fff; box-shadow:0 2px 6px rgba(0,0,0,0.3);
+    display:none; align-items:center; justify-content:center; font-size:13px; font-weight:700;
+    cursor:pointer; line-height:1; transform:translate(-50%,-50%);
+  }
+
+  .confirm-panel { max-width:340px; text-align:center; padding:22px 20px; }
+  .confirm-panel p { font-size:13px; color:#444; margin:0 0 18px; }
+  .confirm-actions { display:flex; gap:10px; justify-content:center; }
+  .confirm-actions button { flex:1; padding:9px; border-radius:6px; font-size:12.5px; cursor:pointer; }
+  #btn-injerto-delete-cancel { border:1px solid #ccc; background:#fff; color:#444; }
+  #btn-injerto-delete-confirm { border:1px solid #E24B4A; background:#E24B4A; color:#fff; font-weight:600; }
 </style>
 </head>
 <body>
-<div id="canvas-container"></div>
-<div id="ui">
-  <h3>Chute CV-201</h3>
-  <div id="category-toggle">
-    <div class="cat-btn" id="btn-cat-estructura">Estructura</div>
-    <div class="cat-btn active" id="btn-cat-placas">Placas guia</div>
+<div id="chute-cover">
+  <div id="chute-cover-inner">
+    <h1>Selecciona un chute</h1>
+    <div id="chute-cover-grid"></div>
   </div>
+</div>
+<div id="viewer-root" style="display:none;">
+<div id="canvas-container"></div>
+<button id="btn-menu" title="Chutes" aria-label="Chutes">&#9776;</button>
+<div id="chute-menu-overlay"></div>
+<div id="chute-menu">
+  <h4>Chutes</h4>
+  <div id="chute-menu-list"></div>
+</div>
+<div id="ui">
+  <h3 id="chute-title">Chute de alimentación 1330CV201</h3>
+  <div id="category-toggle"></div>
   <div id="legend"></div>
   <div id="counts"></div>
   <label id="turno-label">Turno</label>
@@ -64,17 +190,109 @@
   <button id="btn-save">Guardar cambios</button>
   <div id="save-status"></div>
   <button id="btn-pdf" style="margin-top:8px; width:100%; padding:8px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:12px;">Exportar informe PDF</button>
+  <button id="btn-pernos" style="margin-top:8px; width:100%; padding:8px; border-radius:6px; border:1px solid #ccc; background:#fff; cursor:pointer; font-size:12px;">Configurar pernos</button>
   <button id="btn-reset">Restablecer vista</button>
 </div>
 <div id="selected-info">
   <strong id="sel-name">-</strong>
   <div id="sel-state">-</div>
+  <div id="sel-apuntalado-block" style="display:none;">
+    <label><input type="checkbox" id="sel-apuntalado-check"> Tuerca apuntalada</label>
+    <div id="sel-soldadura-wrap" style="display:none;">
+      <label style="display:block; font-size:10.5px; color:#888;">Tipo de soldadura</label>
+      <select id="sel-soldadura-select">
+        <option value="Punto (tack weld)">Punto (tack weld)</option>
+        <option value="Cordon continuo">Cordon continuo</option>
+        <option value="Otro">Otro</option>
+      </select>
+      <input type="text" id="sel-soldadura-otro" placeholder="Especificar..." style="display:none;">
+    </div>
+    <button id="sel-close">Listo</button>
+  </div>
 </div>
+
+<div class="modal-overlay" id="pernos-modal-overlay">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <div>
+        <h3>Configuracion de pernos por tipo de placa</h3>
+        <p>Datos de diseno (no cambian entre paradas). Se agrupan por codigo de placa.</p>
+      </div>
+      <button class="modal-close" id="pernos-modal-close" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="modal-body" id="pernos-modal-body"></div>
+    <div class="modal-footer">
+      <div id="pernos-save-status"></div>
+      <button id="btn-pernos-guardar">Guardar configuracion</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="injerto-modal-overlay">
+  <div class="modal-panel" style="max-width:520px;">
+    <div class="modal-header">
+      <div>
+        <h3>Nuevo injerto</h3>
+        <p>Dibuja el contorno del parche punto por punto y luego ingresa la dimension real de cada segmento.</p>
+      </div>
+      <button class="modal-close" id="injerto-modal-close" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="injerto-step-draw">
+        <canvas id="injerto-draw-canvas" width="440" height="320"></canvas>
+        <div id="injerto-draw-hint">Haz clic para agregar cada vertice del parche (minimo 3).</div>
+        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
+          <button id="btn-injerto-undo">Deshacer ultimo punto</button>
+          <button id="btn-injerto-restart">Reiniciar dibujo</button>
+        </div>
+      </div>
+      <div id="injerto-step-dims" style="display:none;">
+        <div id="injerto-seg-list"></div>
+        <div class="injerto-field">
+          <label>Espesor de plancha (injerto = plancha madre)</label>
+          <input type="text" id="injerto-espesor" placeholder='Ej: 6 mm o 1/4"'>
+        </div>
+        <div class="injerto-field">
+          <label>Proceso de soldadura</label>
+          <select id="injerto-proceso">
+            <option value="SMAW">SMAW (electrodo revestido)</option>
+            <option value="FCAW">FCAW (electrodo tubular)</option>
+            <option value="GMAW">GMAW (MIG/MAG)</option>
+            <option value="GTAW">GTAW (TIG)</option>
+            <option value="Otro">Otro</option>
+          </select>
+        </div>
+        <div class="injerto-field">
+          <label>Tipo de electrodo / material de aporte</label>
+          <input type="text" id="injerto-electrodo" placeholder="Ej: E6011, E71T-1...">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <div id="injerto-save-status"></div>
+      <button id="btn-injerto-crear" disabled>Siguiente</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="injerto-delete-overlay">
+  <div class="modal-panel confirm-panel">
+    <p>¿Seguro que deseas borrar este injerto? Esta accion no se puede deshacer.</p>
+    <div class="confirm-actions">
+      <button id="btn-injerto-delete-cancel">Cancelar</button>
+      <button id="btn-injerto-delete-confirm">Borrar</button>
+    </div>
+  </div>
+</div>
+
+<div id="injerto-delete-badge" title="Borrar injerto">&times;</div>
+
 <div id="loading">Cargando modelo 3D...</div>
+</div>
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-  import { getDatabase, ref, update, onValue, get } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+  import { getDatabase, ref, update, onValue, get, push } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyAT0v3K_kG8btaVrBB2JkyOIhhj_bnlEOI",
@@ -88,7 +306,7 @@
   const fbApp = initializeApp(firebaseConfig);
   const db = getDatabase(fbApp);
 
-  window.__fb = { ref, update, onValue, get, db };
+  window.__fb = { ref, update, onValue, get, push, db };
 </script>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
@@ -106,47 +324,464 @@ window.addEventListener('DOMContentLoaded', function () {
 
 function startApp() {
   var fb = window.__fb;
+  var urlParams = new URLSearchParams(window.location.search);
+
   var COLOR_STEEL = 0x8B95A1;
   var COLOR_LIGHTGRAY = 0xD9D7CF;
   var COLOR_GREEN = 0x639922;
   var COLOR_RED = 0xE24B4A;
   var COLOR_YELLOW = 0xFAC775;
-  var DIM_OPACITY = 0.2;
-  var OT_NUMERO = "34W";
-  var OT_NOMBRE = "Mec Camb Cajn Alim CV201 SD";
+  var COLOR_FLOW = 0x2FA8E8;
 
-  var CATEGORIES = {
-    estructura: {
-      label: "Estructura",
-      prefix: "Pm-",
-      baseColor: COLOR_STEEL,
-      states: [
-        { name: "No inspeccionado", color: COLOR_STEEL },
-        { name: "Cambio", color: COLOR_GREEN },
-        { name: "Proximo a cambio", color: COLOR_YELLOW }
+  // --- Catalogo de chutes disponibles en el menu ---
+  // Para agregar un chute nuevo: subir su archivo .glb al repo y sumar aca una entrada con
+  // un id unico (se usa tambien como ruta de guardado en Firebase, separada por chute).
+  //
+  // "categorias": cada chute define sus propias categorias de piezas (placas, lifters,
+  // estructura, etc), cada una con:
+  //   - match(name): funcion que decide si el nombre de una pieza pertenece a esta categoria
+  //     (no depende de una convencion fija de prefijo -- cada chute puede nombrar distinto).
+  //   - mode: "estado" (clic cicla entre estados, como Cambio/Volteo/etc, con color por
+  //     estado) o "injerto" (clic abre el editor de parches sobre esa cara, sin estados).
+  //   - states: solo para mode "estado". "pdfColor" es un color logico (steel/green/red/
+  //     yellow) que el informe PDF usa para las tarjetas de conteo, independiente del string
+  //     del nombre del estado (para no atarse a "Cambio"/"Volteo" como texto fijo).
+  //
+  // "pernosSchema": campos del formulario "Configurar pernos" para ese chute (puede variar
+  // de un chute a otro). Tipos soportados: "select", "text", "number", "checkbox", y el tipo
+  // especial "grado" (select de grado/clase segun el campo "sistema", con icono de marca de
+  // cabeza). "hideFor": lista de categorias donde el campo no aplica y se oculta (ej. un
+  // chute puede definir que "empotrado" no aplica a lifters).
+  var CHUTES_CONFIG = {
+    "1330CV201": {
+      nombre: "Chute de alimentación 1330CV201",
+      modelo: "./chute.glb",
+      thumbnail: "./thumb-1330cv201.png",
+      ot: "34W",
+      otNombre: "Mec Camb Cajn Alim CV201 SD",
+      // Ruta antigua (plana, antes de existir el selector de chutes). Se usa solo como
+      // respaldo de lectura si todavia no hay datos guardados en la ruta nueva, para no
+      // perder el historial ya registrado por los turnos.
+      legacyFirebasePath: "estados",
+      defaultCategory: "placas",
+      // Este chute tiene paredes izquierda/derecha bien definidas segun el sentido de
+      // carga -- el informe PDF puede generar las vistas de corte por pared. Chutes sin
+      // esta convencion (o con geometria distinta) simplemente omiten esa seccion.
+      pdfWallElevation: true,
+      categorias: {
+        estructura: {
+          label: "Estructura",
+          match: function(name) { return name.indexOf("Pm-") === 0; },
+          mode: "estado",
+          baseColor: COLOR_STEEL,
+          states: [
+            { name: "No inspeccionado", color: COLOR_STEEL, pdfColor: "steel" },
+            { name: "Cambio", color: COLOR_GREEN, pdfColor: "green" },
+            { name: "Proximo a cambio", color: COLOR_YELLOW, pdfColor: "yellow" }
+          ]
+        },
+        placas: {
+          label: "Placas guia",
+          match: function(name) { return name.indexOf("Pg-") === 0; },
+          mode: "estado",
+          baseColor: COLOR_LIGHTGRAY,
+          states: [
+            { name: "No inspeccionado", color: COLOR_LIGHTGRAY, pdfColor: "steel" },
+            { name: "Cambio", color: COLOR_GREEN, pdfColor: "green" },
+            { name: "Volteo", color: COLOR_RED, pdfColor: "red" },
+            { name: "Proxima mantencion", color: COLOR_YELLOW, pdfColor: "yellow" }
+          ]
+        }
+      },
+      pernosSchema: [
+        { key: "tipoCabeza", label: "Tipo de cabeza", type: "select", options: ["Hexagonal", "Socket / Allen", "Otro"] },
+        { key: "material", label: "Material", type: "select", options: ["Acero negro", "Acero inoxidable", "Galvanizado", "Otro"] },
+        { key: "sistema", label: "Sistema", type: "select", options: [["imperial", "Imperial"], ["metrico", "Metrico"]] },
+        { key: "cantidad", label: "Cantidad de pernos por placa", type: "number" },
+        { key: "diametro", label: "Diametro", type: "text", placeholder: 'Ej: 3/4" o M20' },
+        { key: "largo", label: "Largo", type: "text", placeholder: 'Ej: 3" o 60mm' },
+        { key: "grado", label: "Grado / Clase", type: "grado" },
+        { key: "tuercaAutoblocante", label: "Tuerca autoblocante", type: "checkbox" },
+        { key: "arandelaAutoblocante", label: "Arandela autoblocante", type: "checkbox" }
       ]
     },
-    placas: {
-      label: "Placas guia",
-      prefix: "Pg-",
-      baseColor: COLOR_LIGHTGRAY,
-      states: [
-        { name: "No inspeccionado", color: COLOR_LIGHTGRAY },
-        { name: "Cambio", color: COLOR_GREEN },
-        { name: "Volteo", color: COLOR_RED },
-        { name: "Proxima mantencion", color: COLOR_YELLOW }
+    "canaletaBN005": {
+      nombre: "Canaleta de descarga hacia BN005",
+      modelo: "./canaleta-bn005.glb",
+      thumbnail: "./thumb-canaletabn005.png",
+      ot: "",
+      otNombre: "",
+      defaultCategory: "placas",
+      categorias: {
+        placas: {
+          label: "Placas",
+          match: function(name) { return /(^|[^A-Za-z])PL-/i.test(name) || /^Placa/i.test(name); },
+          mode: "estado",
+          baseColor: COLOR_LIGHTGRAY,
+          states: [
+            { name: "No inspeccionado", color: COLOR_LIGHTGRAY, pdfColor: "steel" },
+            { name: "Cambio", color: COLOR_GREEN, pdfColor: "green" },
+            { name: "Prox. Mantencion", color: COLOR_YELLOW, pdfColor: "yellow" }
+          ]
+        },
+        lifters: {
+          label: "Lifters",
+          match: function(name) { return /(^|[^A-Za-z])LF-/i.test(name) || /^Lifter/i.test(name); },
+          mode: "estado",
+          baseColor: COLOR_LIGHTGRAY,
+          states: [
+            { name: "No inspeccionado", color: COLOR_LIGHTGRAY, pdfColor: "steel" },
+            { name: "Cambio", color: COLOR_GREEN, pdfColor: "green" },
+            { name: "Prox. Mantencion", color: COLOR_YELLOW, pdfColor: "yellow" }
+          ]
+        },
+        estructura: {
+          label: "Estructura",
+          match: function(name) { return /(^|[^A-Za-z])ST-/i.test(name); },
+          mode: "injerto",
+          baseColor: COLOR_STEEL
+        }
+      },
+      // Placas y lifters comparten formulario de pernos, salvo "empotrado" que solo aplica
+      // a placas (los lifters de este chute nunca llevan perno empotrado).
+      pernosSchema: [
+        { key: "empotrado", label: "Perno empotrado en la placa", type: "checkbox", hideFor: ["lifters"] },
+        { key: "diametro", label: "Diametro (Ø)", type: "text", placeholder: 'Ej: 3/4" o M20' },
+        { key: "largo", label: "Largo", type: "text", placeholder: 'Ej: 3" o 60mm' },
+        { key: "tipoCabeza", label: "Tipo de cabeza", type: "select", options: ["Hexagonal", "Cuadrada", "Avellanado", "Tipo candado", "Otro"] },
+        { key: "sistema", label: "Sistema", type: "select", options: [["imperial", "Imperial"], ["metrico", "Metrico"]] },
+        { key: "grado", label: "Grado / Clase", type: "grado" },
+        { key: "cantidad", label: "Cantidad de pernos", type: "number" },
+        { key: "tuerca", label: "Se uso tuerca", type: "checkbox" },
+        { key: "arandela", label: "Se uso arandela", type: "checkbox" },
+        { key: "arandelaPresion", label: "Se uso arandela de presion", type: "checkbox" }
       ]
     }
   };
+  var CHUTE_ORDER = Object.keys(CHUTES_CONFIG);
+  var chuteIdParam = urlParams.get('chute');
 
-  var activeCategory = "placas";
+  // Sin un chute valido en la URL: mostrar la portada de seleccion (miniatura + boton por
+  // chute) en vez de cargar un chute por defecto. El visor 3D completo (canvas, camara,
+  // Firebase, etc.) ni siquiera se inicializa hasta que se elige uno.
+  if (!chuteIdParam || !CHUTES_CONFIG[chuteIdParam]) {
+    var coverGrid = document.getElementById('chute-cover-grid');
+    CHUTE_ORDER.forEach(function(id) {
+      var cfg = CHUTES_CONFIG[id];
+      var card = document.createElement('div');
+      card.className = 'chute-card';
+      var img = document.createElement('img');
+      img.src = cfg.thumbnail || '';
+      img.alt = cfg.nombre;
+      var btn = document.createElement('button');
+      btn.className = 'chute-card-btn';
+      btn.textContent = cfg.nombre;
+      btn.addEventListener('click', function() {
+        var p = new URLSearchParams(window.location.search);
+        p.set('chute', id);
+        window.location.search = p.toString();
+      });
+      card.appendChild(img);
+      card.appendChild(btn);
+      coverGrid.appendChild(card);
+    });
+    document.getElementById('chute-cover').classList.add('open');
+    return;
+  }
+
+  document.getElementById('viewer-root').style.display = '';
+  var chuteId = chuteIdParam;
+  var currentChute = CHUTES_CONFIG[chuteId];
+  var chuteFbPath = 'estados/' + chuteId;
+
+  document.title = currentChute.nombre + ' - Inspeccion';
+  document.getElementById('chute-title').textContent = currentChute.nombre;
+
+  // --- Menu lateral para elegir chute ---
+  var menuEl = document.getElementById('chute-menu');
+  var menuOverlayEl = document.getElementById('chute-menu-overlay');
+  function openChuteMenu() { menuEl.classList.add('open'); menuOverlayEl.classList.add('open'); }
+  function closeChuteMenu() { menuEl.classList.remove('open'); menuOverlayEl.classList.remove('open'); }
+  document.getElementById('btn-menu').addEventListener('click', openChuteMenu);
+  menuOverlayEl.addEventListener('click', closeChuteMenu);
+
+  var menuListEl = document.getElementById('chute-menu-list');
+  CHUTE_ORDER.forEach(function(id) {
+    var item = document.createElement('div');
+    item.className = 'chute-menu-item' + (id === chuteId ? ' active' : '');
+    item.textContent = CHUTES_CONFIG[id].nombre;
+    item.addEventListener('click', function() {
+      if (id === chuteId) { closeChuteMenu(); return; }
+      var p = new URLSearchParams(window.location.search);
+      p.set('chute', id);
+      window.location.search = p.toString();
+    });
+    menuListEl.appendChild(item);
+  });
+
+  var DIM_OPACITY = 0.2;
+  var OT_NUMERO = currentChute.ot;
+  var OT_NOMBRE = currentChute.otNombre;
+  var CATEGORIES = currentChute.categorias;
+  var CATEGORY_ORDER = Object.keys(CATEGORIES);
+  var PERNOS_SCHEMA = currentChute.pernosSchema || [];
+
+  var activeCategory = currentChute.defaultCategory || CATEGORY_ORDER[0];
   var meshStates = {};
   var dirtyKeys = {};
   var modelBox = null;
+  var pernosConfig = {}; // { [codigoPlaca]: {tipoCabeza, sistema, diametro, largo, grado, material, cantidad, tuercaAutoblocante, arandelaAutoblocante} }
+  var pernosFbPath = 'config/' + chuteId + '/pernos';
+
+  // Codigo "crudo" derivado solo del nombre de la pieza (como venia el modelo). No tiene
+  // que ser perfecto -- buildCodeRemap despues agrupa por geometria real, asi que esto solo
+  // necesita acercarse.
+  // - SolidWorks (CV-201), Placas (Pg-): el numero final es un contador de instancia
+  //   repetido (1..44), se ignora junto con el lado. Ej: "Pg-izq-VR-FD-02-07" y
+  //   "Pg-der-VR-FD-02-13" -> "Pg-VR-FD-02".
+  // - SolidWorks (CV-201), Estructura (Pm-): cada pieza es unica (no se repite en serie), el
+  //   numero final es parte de su identidad y se conserva. Ej: "Pm-der-MD-01" -> "Pm-MD-01".
+  // - Inventor (nombres de componente de ensamblaje, ej. "Placa PL-1A_MIR_CPY1:1"): se le
+  //   quita el numero de instancia final (":N") y los sufijos automaticos que Inventor
+  //   agrega al espejar/copiar un componente (_MIR, _CPY, _MIRn, _CPYn, en cualquier orden
+  //   y combinacion), dejando solo el codigo base (ej. "Placa PL-1A").
+  function getRawPlateCode(label) {
+    var m = label.match(/^(Pg)-(izq|der)-(.+?)-\d+$/);
+    if (m) return m[1] + '-' + m[3];
+    m = label.match(/^(Pm)-(izq|der|sup|ant)-(.+)$/);
+    if (m) return m[1] + '-' + m[3];
+
+    // Ojo: THREE.GLTFLoader elimina el ":" del nombre original sin dejar separador (ej.
+    // "PL-05:1" llega aca como "PL-051", pegado al codigo) -- por eso NO se puede asumir de
+    // forma confiable donde termina el codigo y empieza el numero de instancia, y no se
+    // intenta despojar un "-numero" final generico (a diferencia de antes). Lo que si se
+    // puede despojar con confianza son los sufijos _MIR/_CPY que Inventor agrega al
+    // espejar/copiar, porque son literales y no ambiguos. El agrupamiento final igual queda
+    // resuelto correctamente por buildCodeRemap comparando geometria real: si de varias
+    // instancias del mismo tipo alguna termina "limpia" (por pasar por el strip de
+    // _MIR/_CPY), esa es la que se usa como codigo canonico visible.
+    var code = label.replace(/:\d+$/, '');
+    var strippedSomething = true;
+    while (strippedSomething) {
+      var before = code;
+      code = code.replace(/_(MIR|CPY)\d*$/i, '');
+      strippedSomething = (code !== before);
+    }
+    return code;
+  }
+
+  // En exportes de ensamblaje de Inventor, el nodo que realmente tiene la malla 3D suele
+  // quedar con un nombre generico ("Solido1"), mientras el nombre real de la pieza
+  // (ej. "Placa PL-1A_MIR_CPY1:1") queda en el nodo padre (el "componente" del ensamblaje).
+  // Ademas, cuando muchas piezas distintas comparten ese mismo nombre generico "Solido1" en
+  // el archivo, THREE.GLTFLoader les agrega un sufijo para que sean unicas dentro de la
+  // escena (ej. "Solido1_1", "Solido1_2", ...) -- por eso la deteccion de "nombre generico"
+  // tiene que ignorar ese sufijo tambien.
+  function isGenericSolidName(n) {
+    return /^S[oó]lido\d*$/i.test(n.replace(/_\d+$/, ''));
+  }
+  function resolvePieceName(child) {
+    var n = child.name.replace(/-1$/, '');
+    if (n && !isGenericSolidName(n)) return n;
+    var p = child.parent;
+    while (p) {
+      if (p.name && !isGenericSolidName(p.name)) return p.name;
+      p = p.parent;
+    }
+    return n;
+  }
+
+  // El nombre de la pieza no es confiable para saber si dos piezas son "el mismo tipo" --
+  // en SolidWorks es comun numerar instancias distinto (VR-FD-01, VR-FD-02, ...) aunque el
+  // diseno de la placa sea identico. codeRemap se completa despues de cargar el modelo,
+  // comparando la geometria REAL (ver buildCodeRemap), y mapea cada codigo crudo a un
+  // codigo canonico compartido cuando dos codigos crudos resultan ser la misma pieza.
+  var codeRemap = {};
+  function getPlateCode(label) {
+    var raw = getRawPlateCode(label);
+    return codeRemap[raw] || raw;
+  }
+
+  // Compara todas las piezas por su firma geometrica real (cantidad de vertices + las 3
+  // dimensiones del bounding box local redondeadas a mm, ignorando rotacion/posicion) en
+  // vez de por su nombre. Si dos codigos crudos distintos resultan tener exactamente la
+  // misma firma dentro de la misma categoria (placas o estructura), se fusionan bajo un
+  // solo codigo canonico (el primero en orden alfabetico) para que compartan una sola
+  // especificacion de pernos.
+  function buildCodeRemap() {
+    var sigByRawCode = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      var raw = getRawPlateCode(e.label);
+      if (sigByRawCode[raw]) return;
+      var dims = plateDimsMm(e.mesh);
+      var vcount = e.mesh.geometry.attributes.position.count;
+      sigByRawCode[raw] = e.category + '|' + vcount + '|' + dims.join('x');
+    });
+    // Ordenar por largo primero (el codigo mas corto/limpio gana como canonico dentro de
+    // cada grupo con la misma geometria -- ver nota en getRawPlateCode sobre por que un
+    // codigo puede quedar con digitos de instancia pegados), alfabetico como desempate.
+    var rawCodes = Object.keys(sigByRawCode).sort(function(a, b) {
+      return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
+    });
+    var canonicalBySig = {};
+    codeRemap = {};
+    rawCodes.forEach(function(raw) {
+      var sig = sigByRawCode[raw];
+      if (!canonicalBySig[sig]) canonicalBySig[sig] = raw;
+      if (canonicalBySig[sig] !== raw) codeRemap[raw] = canonicalBySig[sig];
+    });
+  }
+
+  // --- Dibujo esquematico (no foto) de la marca de grado en la cabeza del perno ---
+  // Convencion SAE J429: 0 lineas radiales = Grado 2, 3 lineas = Grado 5, 6 lineas = Grado 8.
+  // Los pernos metricos llevan la clase de propiedad (ej. 8.8, 10.9) estampada como numero.
+  function drawBoltGradeIcon(canvas, sistema, grado) {
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    var cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 3;
+
+    ctx.strokeStyle = '#2C2C2A';
+    ctx.fillStyle = '#f4f3ef';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (var i = 0; i < 6; i++) {
+      var a = Math.PI / 3 * i - Math.PI / 2;
+      var px = cx + r * Math.cos(a), py = cy + r * Math.sin(a);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    if (sistema === 'metrico') {
+      ctx.fillStyle = '#2C2C2A';
+      ctx.font = 'bold ' + Math.round(r * 0.62) + 'px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(grado || '?', cx, cy + 1);
+      return;
+    }
+
+    var lineCount = grado === 'Grado 8' ? 6 : grado === 'Grado 5' ? 3 : grado === 'Grado 2' ? 0 : -1;
+    if (lineCount < 0) {
+      ctx.fillStyle = '#2C2C2A';
+      ctx.font = 'bold ' + Math.round(r * 0.45) + 'px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(grado || '?', cx, cy + 1);
+      return;
+    }
+    ctx.strokeStyle = '#2C2C2A';
+    ctx.lineWidth = Math.max(1.2, r * 0.12);
+    for (var j = 0; j < lineCount; j++) {
+      var ang = (Math.PI * 2 / lineCount) * j - Math.PI / 2;
+      var ix = cx + r * 0.32 * Math.cos(ang), iy = cy + r * 0.32 * Math.sin(ang);
+      var ox = cx + r * 0.82 * Math.cos(ang), oy = cy + r * 0.82 * Math.sin(ang);
+      ctx.beginPath();
+      ctx.moveTo(ix, iy);
+      ctx.lineTo(ox, oy);
+      ctx.stroke();
+    }
+  }
+
+  // --- Dibujo esquematico del tipo de cabeza del perno (vista superior para las que se
+  // reconocen mejor de frente -- hexagonal, cuadrada, socket/allen -- y vista lateral para
+  // las que se reconocen mejor de perfil -- avellanado, tipo candado) ---
+  function drawBoltHeadTypeIcon(canvas, tipo) {
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    var cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 3;
+    ctx.strokeStyle = '#2C2C2A';
+    ctx.fillStyle = '#f4f3ef';
+    ctx.lineWidth = 1.4;
+    var t = (tipo || '').toLowerCase();
+
+    if (t.indexOf('cuadrada') !== -1) {
+      var s = r * 1.5;
+      ctx.beginPath();
+      ctx.rect(cx - s / 2, cy - s / 2, s, s);
+      ctx.fill(); ctx.stroke();
+    } else if (t.indexOf('avellanad') !== -1) {
+      // Perfil lateral: cabeza embutida, plana arriba, angulada hacia el vastago.
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.9, cy - r * 0.55);
+      ctx.lineTo(cx + r * 0.9, cy - r * 0.55);
+      ctx.lineTo(cx + r * 0.28, cy + r * 0.75);
+      ctx.lineTo(cx - r * 0.28, cy + r * 0.75);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else if (t.indexOf('candado') !== -1) {
+      // Perfil lateral: cabeza redondeada (domo) sobre vastago corto.
+      ctx.beginPath();
+      ctx.arc(cx, cy - r * 0.05, r * 0.85, Math.PI, 0);
+      ctx.lineTo(cx + r * 0.28, cy + r * 0.7);
+      ctx.lineTo(cx - r * 0.28, cy + r * 0.7);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else if (t.indexOf('socket') !== -1 || t.indexOf('allen') !== -1) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.85, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      ctx.beginPath();
+      for (var i = 0; i < 6; i++) {
+        var a = Math.PI / 3 * i - Math.PI / 2;
+        var px = cx + r * 0.42 * Math.cos(a), py = cy + r * 0.42 * Math.sin(a);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#c9c6bd';
+      ctx.fill();
+      ctx.strokeStyle = '#2C2C2A';
+      ctx.stroke();
+    } else if (t.indexOf('hexagonal') !== -1) {
+      ctx.beginPath();
+      for (var j = 0; j < 6; j++) {
+        var ang = Math.PI / 3 * j - Math.PI / 2;
+        var px2 = cx + r * Math.cos(ang), py2 = cy + r * Math.sin(ang);
+        if (j === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
+      }
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else {
+      ctx.fillStyle = '#2C2C2A';
+      ctx.font = 'bold ' + Math.round(r * 0.9) + 'px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('?', cx, cy + 1);
+    }
+  }
+
+  // Genera un data URL PNG de un icono esquematico dibujando en un canvas temporal fuera de
+  // pantalla -- usado para insertar los iconos de grado/tipo de cabeza dentro del PDF, que
+  // solo puede recibir imagenes (no puede referenciar directamente un <canvas> del DOM).
+  function iconToDataUrl(drawFn) {
+    var c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    drawFn(c);
+    return c.toDataURL('image/png');
+  }
 
   var container = document.getElementById('canvas-container');
   var scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf1efe8);
+
+  // Fondo con degradado suave (en vez de color plano) para dar profundidad
+  // sin restar contraste a las piezas del modelo durante la inspeccion.
+  function makeBackgroundTexture() {
+    var canvas = document.createElement('canvas');
+    canvas.width = 2; canvas.height = 512;
+    var ctx = canvas.getContext('2d');
+    var grad = ctx.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0, '#eef2f6');
+    grad.addColorStop(0.55, '#dde3e9');
+    grad.addColorStop(1, '#b7c0c9');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 2, 512);
+    return new THREE.CanvasTexture(canvas);
+  }
+  scene.background = makeBackgroundTexture();
 
   var camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 50000);
   camera.position.set(4000, 3000, 4000);
@@ -201,6 +836,7 @@ function startApp() {
   }
 
   renderer.domElement.addEventListener('pointerdown', function(e) {
+    if (tryStartPatchDrag(e)) return;
     renderer.domElement.setPointerCapture(e.pointerId);
     pointers[e.pointerId] = { x: e.clientX, y: e.clientY, type: e.pointerType };
     var ids = Object.keys(pointers);
@@ -212,6 +848,7 @@ function startApp() {
   });
 
   renderer.domElement.addEventListener('pointermove', function(e) {
+    if (updatePatchDrag(e)) return;
     if (!pointers[e.pointerId]) return;
     var prev = pointers[e.pointerId];
     var dx = e.clientX - prev.x, dy = e.clientY - prev.y;
@@ -243,6 +880,7 @@ function startApp() {
   });
 
   function releasePointer(e) {
+    if (endPatchDrag(e)) return;
     delete pointers[e.pointerId];
     var ids = Object.keys(pointers);
     pinchStartDist = null;
@@ -267,10 +905,116 @@ function startApp() {
   var loader = new THREE.GLTFLoader();
   var raycaster = new THREE.Raycaster();
   var mouse = new THREE.Vector2();
-  var typeLabelMeshes = []; // {mesh, text}
+  var selInfoFadeTimer = null, selInfoHideTimer = null;
+  var currentSelectedKey = null;
+
+  // Etiqueta simple para piezas sin intervencion (vuelven a "No inspeccionado"): aparece
+  // y se desvanece sola a los 2s, igual que antes.
+  function showAutoFadeInfo(label, stateName) {
+    var info = document.getElementById('selected-info');
+    document.getElementById('sel-apuntalado-block').style.display = 'none';
+    currentSelectedKey = null;
+    clearTimeout(selInfoFadeTimer);
+    clearTimeout(selInfoHideTimer);
+    document.getElementById('sel-name').textContent = label;
+    document.getElementById('sel-state').textContent = stateName;
+    info.style.display = 'block';
+    void info.offsetHeight; // fuerza reflow para que la transicion de opacidad se dispare
+    info.style.opacity = '1';
+    selInfoFadeTimer = setTimeout(function() {
+      info.style.opacity = '0';
+      selInfoHideTimer = setTimeout(function() { info.style.display = 'none'; }, 400);
+    }, 2000);
+  }
+
+  // Mini-formulario persistente (no se desvanece solo) para piezas que si tuvieron una
+  // intervencion: permite marcar si se apuntalo la tuerca y con que tipo de soldadura.
+  function showInterventionForm(key, entry, stateName) {
+    clearTimeout(selInfoFadeTimer);
+    clearTimeout(selInfoHideTimer);
+    currentSelectedKey = key;
+    var info = document.getElementById('selected-info');
+    document.getElementById('sel-name').textContent = entry.label;
+    document.getElementById('sel-state').textContent = stateName;
+
+    var check = document.getElementById('sel-apuntalado-check');
+    var soldWrap = document.getElementById('sel-soldadura-wrap');
+    var soldSel = document.getElementById('sel-soldadura-select');
+    var soldOtro = document.getElementById('sel-soldadura-otro');
+    check.checked = !!entry.apuntalado;
+    soldWrap.style.display = check.checked ? 'block' : 'none';
+    if (entry.soldadura === 'Punto (tack weld)' || entry.soldadura === 'Cordon continuo') {
+      soldSel.value = entry.soldadura; soldOtro.style.display = 'none'; soldOtro.value = '';
+    } else if (entry.soldadura) {
+      soldSel.value = 'Otro'; soldOtro.style.display = 'block'; soldOtro.value = entry.soldadura;
+    } else {
+      soldSel.value = 'Punto (tack weld)'; soldOtro.style.display = 'none'; soldOtro.value = '';
+    }
+    document.getElementById('sel-apuntalado-block').style.display = 'block';
+
+    info.style.display = 'block';
+    void info.offsetHeight;
+    info.style.opacity = '1';
+  }
+
+  // El apuntalamiento se marca por TIPO de pieza, no por instancia individual: si dices que
+  // se apuntalo LF-01, se asume que se aplico igual a todas las piezas LF-01 que se
+  // intervinieron en esta parada (no hace falta marcarlas una por una). Solo afecta a las
+  // piezas ya intervenidas (estado distinto de "No inspeccionado"); las no tocadas quedan
+  // igual.
+  function applyToTypeGroup(key, mutateFn) {
+    var code = getPlateCode(meshStates[key].label);
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      if (e.state !== 0 && getPlateCode(e.label) === code) {
+        mutateFn(e);
+        dirtyKeys[k] = true;
+      }
+    });
+  }
+
+  document.getElementById('sel-apuntalado-check').addEventListener('change', function() {
+    if (!currentSelectedKey) return;
+    var checked = this.checked;
+    applyToTypeGroup(currentSelectedKey, function(e) { e.apuntalado = checked; });
+    document.getElementById('sel-soldadura-wrap').style.display = checked ? 'block' : 'none';
+    updateSaveButton();
+  });
+  document.getElementById('sel-soldadura-select').addEventListener('change', function() {
+    if (!currentSelectedKey) return;
+    var otroInput = document.getElementById('sel-soldadura-otro');
+    var val;
+    if (this.value === 'Otro') { otroInput.style.display = 'block'; val = otroInput.value; }
+    else { otroInput.style.display = 'none'; val = this.value; }
+    applyToTypeGroup(currentSelectedKey, function(e) { e.soldadura = val; });
+    updateSaveButton();
+  });
+  document.getElementById('sel-soldadura-otro').addEventListener('input', function() {
+    if (!currentSelectedKey) return;
+    var val = this.value;
+    applyToTypeGroup(currentSelectedKey, function(e) { e.soldadura = val; });
+    updateSaveButton();
+  });
+  document.getElementById('sel-close').addEventListener('click', function() {
+    hideSelectedInfo();
+  });
+
+  function hideSelectedInfo() {
+    clearTimeout(selInfoFadeTimer);
+    clearTimeout(selInfoHideTimer);
+    var info = document.getElementById('selected-info');
+    info.style.opacity = '0';
+    info.style.display = 'none';
+    document.getElementById('sel-apuntalado-block').style.display = 'none';
+    currentSelectedKey = null;
+  }
 
   function renderLegend() {
     var cat = CATEGORIES[activeCategory];
+    if (cat.mode !== 'estado') {
+      document.getElementById('legend').innerHTML = '<div class="legend-item" style="color:#888;">Clic en una cara para agregar un injerto</div>';
+      return;
+    }
     var html = '';
     cat.states.forEach(function(s) {
       html += '<div class="legend-item"><span class="swatch" style="background:#' + s.color.toString(16).padStart(6,'0') + '"></span>' + s.name + '</div>';
@@ -280,6 +1024,11 @@ function startApp() {
 
   function renderCounts() {
     var cat = CATEGORIES[activeCategory];
+    if (cat.mode !== 'estado') {
+      var total = Object.keys(meshStates).filter(function(k) { return meshStates[k].category === activeCategory; }).length;
+      document.getElementById('counts').innerHTML = '<div><span>Piezas</span><strong>' + total + '</strong></div>';
+      return;
+    }
     var counts = cat.states.map(function() { return 0; });
     var total = 0;
     Object.keys(meshStates).forEach(function(k) {
@@ -300,8 +1049,9 @@ function startApp() {
     Object.keys(meshStates).forEach(function(k) {
       var e = meshStates[k];
       var isActive = (e.category === activeCategory);
-      var stateDef = CATEGORIES[e.category].states[e.state];
-      e.mesh.material.color.setHex(stateDef.color);
+      var catDef = CATEGORIES[e.category];
+      var color = (catDef.mode === 'estado') ? catDef.states[e.state].color : catDef.baseColor;
+      e.mesh.material.color.setHex(color);
       if (isActive) {
         e.mesh.material.transparent = false;
         e.mesh.material.opacity = 1;
@@ -310,98 +1060,32 @@ function startApp() {
         e.mesh.material.opacity = DIM_OPACITY;
       }
     });
-    updateTypeLabelsVisibility();
+    var patchesActive = CATEGORIES[activeCategory].mode !== 'estado';
+    Object.keys(patches).forEach(function(id) {
+      patches[id].mesh.material.opacity = patchesActive ? PATCH_OPACITY : PATCH_OPACITY * DIM_OPACITY;
+    });
     renderLegend();
     renderCounts();
-    document.getElementById('selected-info').style.display = 'none';
+    hideSelectedInfo();
   }
 
+  var catToggleEl = document.getElementById('category-toggle');
   function setCategory(cat) {
     activeCategory = cat;
-    document.getElementById('btn-cat-estructura').classList.toggle('active', cat === 'estructura');
-    document.getElementById('btn-cat-placas').classList.toggle('active', cat === 'placas');
+    Array.prototype.forEach.call(catToggleEl.children, function(btn) {
+      btn.classList.toggle('active', btn.dataset.cat === cat);
+    });
     applyCategoryVisuals();
   }
 
-  document.getElementById('btn-cat-estructura').addEventListener('click', function() { setCategory('estructura'); });
-  document.getElementById('btn-cat-placas').addEventListener('click', function() { setCategory('placas'); });
-
-  // --- Etiquetas de tipo (una por tipo, con cantidad) ---
-  var typeLabelSvg = null;
-
-  function buildTypeLabels() {
-    var seen = {};
-    Object.keys(meshStates).forEach(function(k) {
-      var entry = meshStates[k];
-      var m = entry.label.match(/^(Pg)-(izq|der)-(.+)-(\d+)$/);
-      var typeKey, code;
-      if (m) { typeKey = m[1] + '-' + m[2] + '-' + m[3]; code = m[3] + (m[2] === 'izq' ? ' izq.' : ' der.'); }
-      else { typeKey = entry.label; code = entry.label; }
-      if (!seen[typeKey]) seen[typeKey] = { count: 0, sample: entry, code: code };
-      seen[typeKey].count++;
-    });
-
-    typeLabelSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    typeLabelSvg.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; z-index:14; pointer-events:none;';
-    document.body.appendChild(typeLabelSvg);
-
-    typeLabelMeshes = [];
-    var offsets = [ [70,-70], [-70,-70], [70,70], [-70,70], [95,-30], [-95,-30], [95,30], [-95,30] ];
-    var i = 0;
-    Object.keys(seen).forEach(function(tk) {
-      var info = seen[tk];
-      var div = document.createElement('div');
-      div.className = 'type-label';
-      div.textContent = info.code + ' (x' + info.count + ')';
-      document.body.appendChild(div);
-      var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('stroke', '#2C2C2A');
-      line.setAttribute('stroke-width', '1.3');
-      typeLabelSvg.appendChild(line);
-      var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      dot.setAttribute('r', '3');
-      dot.setAttribute('fill', '#2C2C2A');
-      typeLabelSvg.appendChild(dot);
-      typeLabelMeshes.push({
-        mesh: info.sample.mesh, category: info.sample.category,
-        el: div, line: line, dot: dot,
-        offset: offsets[i % offsets.length],
-        worldCenter: info.sample.worldCenter
-      });
-      i++;
-    });
-  }
-
-  function updateTypeLabelsVisibility() {
-    typeLabelMeshes.forEach(function(t) {
-      var visible = (t.category === activeCategory);
-      t.el.style.display = visible ? 'block' : 'none';
-      t.line.style.display = visible ? 'block' : 'none';
-      t.dot.style.display = visible ? 'block' : 'none';
-    });
-  }
-
-  function updateTypeLabelPositions() {
-    var w = window.innerWidth, h = window.innerHeight;
-    typeLabelMeshes.forEach(function(t) {
-      if (t.el.style.display === 'none') return;
-      var pos = t.worldCenter.clone();
-      pos.project(camera);
-      if (pos.z > 1) {
-        t.el.style.display = 'none'; t.line.style.display = 'none'; t.dot.style.display = 'none';
-        return;
-      }
-      var x = (pos.x * 0.5 + 0.5) * w;
-      var y = (-pos.y * 0.5 + 0.5) * h;
-      var lx = x + t.offset[0];
-      var ly = y + t.offset[1];
-      t.el.style.left = lx + 'px';
-      t.el.style.top = ly + 'px';
-      t.line.setAttribute('x1', x); t.line.setAttribute('y1', y);
-      t.line.setAttribute('x2', lx); t.line.setAttribute('y2', ly);
-      t.dot.setAttribute('cx', x); t.dot.setAttribute('cy', y);
-    });
-  }
+  CATEGORY_ORDER.forEach(function(key) {
+    var btn = document.createElement('div');
+    btn.className = 'cat-btn' + (key === activeCategory ? ' active' : '');
+    btn.textContent = CATEGORIES[key].label;
+    btn.dataset.cat = key;
+    btn.addEventListener('click', function() { setCategory(key); });
+    catToggleEl.appendChild(btn);
+  });
 
   // --- Flecha de direccion de flujo ---
   var flowMarkers = [];
@@ -412,6 +1096,8 @@ function startApp() {
   var entryStart = new THREE.Vector3();
   var entryLength = 1;
 
+  var GHOST_OPACITY_FACTOR = 0.35; // que tan visibles se ven las flechas al quedar tapadas por una placa/estructura
+
   function makeFlatArrowGeometry() {
     var shape = new THREE.Shape();
     shape.moveTo(0, 0.5);
@@ -421,75 +1107,175 @@ function startApp() {
     return new THREE.ShapeGeometry(shape);
   }
 
-  function addFlowArrow(box) {
-    var size = box.getSize(new THREE.Vector3());
-    var longAxis = size.x >= size.z ? 'x' : 'z';
-    flowLength = (longAxis === 'x' ? size.x : size.z) * 0.9;
-    flowDir.copy(longAxis === 'x' ? new THREE.Vector3(1,0,0) : new THREE.Vector3(0,0,1));
-    flowStart.copy(box.getCenter(new THREE.Vector3()));
-    flowStart.y = box.min.y + size.y * 0.55;
-    if (longAxis === 'x') flowStart.x = box.min.x + size.x * 0.05; else flowStart.z = box.min.z + size.z * 0.05;
+  // Cada flecha se dibuja dos veces sobre la misma geometria: una copia "normal" que
+  // se oculta correctamente detras del modelo, y una copia "fantasma" (depthTest:false,
+  // opacidad baja) que ignora la profundidad y por lo tanto se sigue viendo, atenuada,
+  // aunque quede tapada por una placa o pieza de estructura.
+  function makeArrowMarkerPair(geo) {
+    var front = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: COLOR_FLOW, side: THREE.DoubleSide, transparent: true }));
+    var ghost = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: COLOR_FLOW, side: THREE.DoubleSide, transparent: true, depthTest: false }));
+    ghost.renderOrder = 999;
+    return { front: front, ghost: ghost };
+  }
+
+  // El chute no siempre esta alineado con los ejes del mundo, y puede estar inclinado (ej.
+  // 30 grados) -- el eje de flujo tiene que seguir esa inclinacion real, no solo el angulo
+  // horizontal. Se calcula por PCA en 3D (no solo XZ) sobre los centros reales de las
+  // piezas: el autovector dominante de la matriz de covarianza es la direccion en la que
+  // el chute esta realmente "estirado", incluyendo su pendiente. Se resuelve por iteracion
+  // de potencia (simple y suficiente para una matriz 3x3 simetrica, sin depender de una
+  // libreria de algebra lineal).
+  function computeFlowAxis3D() {
+    var centers = Object.keys(meshStates).map(function(k) { return meshStates[k].worldCenter; });
+    if (centers.length < 2) return new THREE.Vector3(1, 0, 0);
+    var mean = new THREE.Vector3();
+    centers.forEach(function(c) { mean.add(c); });
+    mean.multiplyScalar(1 / centers.length);
+
+    var cxx = 0, cxy = 0, cxz = 0, cyy = 0, cyz = 0, czz = 0;
+    centers.forEach(function(c) {
+      var dx = c.x - mean.x, dy = c.y - mean.y, dz = c.z - mean.z;
+      cxx += dx * dx; cxy += dx * dy; cxz += dx * dz;
+      cyy += dy * dy; cyz += dy * dz; czz += dz * dz;
+    });
+
+    var v = new THREE.Vector3(1, 0.35, 0.35).normalize();
+    for (var iter = 0; iter < 60; iter++) {
+      var nx = cxx * v.x + cxy * v.y + cxz * v.z;
+      var ny = cxy * v.x + cyy * v.y + cyz * v.z;
+      var nz = cxz * v.x + cyz * v.y + czz * v.z;
+      var nv = new THREE.Vector3(nx, ny, nz);
+      if (nv.lengthSq() < 1e-12) break;
+      v = nv.normalize();
+    }
+    return v;
+  }
+
+  // Proyecta los centros de las piezas sobre un eje 3D y devuelve el rango [min,max]
+  // relativo al centro del bounding box -- el largo real del chute a lo largo de ese eje
+  // (no size.x/size.z, que asumen alineacion a los ejes del mundo y un chute horizontal).
+  function projectOntoAxis(axis, center) {
+    var minP = Infinity, maxP = -Infinity;
+    Object.keys(meshStates).forEach(function(k) {
+      var c = meshStates[k].worldCenter;
+      var p = (c.x - center.x) * axis.x + (c.y - center.y) * axis.y + (c.z - center.z) * axis.z;
+      minP = Math.min(minP, p);
+      maxP = Math.max(maxP, p);
+    });
+    return { min: minP, max: maxP };
+  }
+
+  function addFlowArrow(box, axis, entryProjSign) {
+    var center = box.getCenter(new THREE.Vector3());
+    var range = projectOntoAxis(axis, center);
+    // El flujo sale desde el mismo lado donde cae el material (entryProjSign), alejandose
+    // hacia el otro extremo -- asi ambas flechas quedan consistentes entre si.
+    // entryProjSign -1 = la entrada esta del lado "min" del eje -> el flujo avanza hacia
+    // "max" (mismo sentido que el eje). entryProjSign +1 = entrada del lado "max" -> el
+    // flujo avanza hacia "min" (sentido contrario al eje).
+    flowDir.copy(axis);
+    if (entryProjSign > 0) flowDir.negate();
+    flowLength = (range.max - range.min) * 0.9;
+
+    var entryEdgeProj = (entryProjSign < 0) ? range.min : range.max;
+    flowStart.copy(center);
+    flowStart.addScaledVector(axis, entryEdgeProj);
+    flowStart.addScaledVector(flowDir, flowLength * 0.05);
+    // Pequeno desfase vertical para que la flecha quede sobre la superficie de las placas
+    // en vez de enterrada en ellas (antes se asumia flujo horizontal y se usaba una altura
+    // fija; ahora flowDir ya sigue la pendiente real, solo hace falta este empujon inicial).
+    flowStart.y += box.getSize(new THREE.Vector3()).length() * 0.03;
 
     var markerLen = flowLength * 0.05;
+    // La punta de la geometria "plana" apunta a +X antes de rotar. rotateX(-90) la acuesta
+    // en el plano XZ (sigue apuntando a +X). El quaternion que lleva de (1,0,0) a flowDir
+    // (que ya es un vector 3D real, con componente Y si el chute esta inclinado) orienta la
+    // flecha exactamente sobre el plano inclinado, sin matematica manual de angulos.
+    var q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), flowDir);
+    var rotMatrix = new THREE.Matrix4().makeRotationFromQuaternion(q);
     var n = 6;
     for (var i = 0; i < n; i++) {
       var geo = makeFlatArrowGeometry();
       geo.rotateX(-Math.PI / 2);
-      if (longAxis === 'z') geo.rotateY(Math.PI / 2);
+      geo.applyMatrix4(rotMatrix);
       geo.scale(markerLen, markerLen, markerLen);
-      var mat = new THREE.MeshBasicMaterial({ color: 0x639922, side: THREE.DoubleSide });
-      var mesh = new THREE.Mesh(geo, mat);
-      mesh.userData.offset = i / n;
-      scene.add(mesh);
-      flowMarkers.push(mesh);
+      var pair = makeArrowMarkerPair(geo);
+      pair.front.userData.offset = i / n;
+      scene.add(pair.front);
+      scene.add(pair.ghost);
+      flowMarkers.push(pair);
     }
   }
 
-  function addEntryArrow(box) {
+  function addEntryArrow(box, axis) {
     var size = box.getSize(new THREE.Vector3());
+    var center = box.getCenter(new THREE.Vector3());
+    var range = projectOntoAxis(axis, center);
     entryLength = size.y * 1.1;
-    entryStart.copy(box.getCenter(new THREE.Vector3()));
+    entryStart.copy(center);
     entryStart.y = box.max.y + entryLength;
-    var longAxis = size.x >= size.z ? 'x' : 'z';
-    if (longAxis === 'x') entryStart.x = box.min.x + size.x * 0.18; else entryStart.z = box.min.z + size.z * 0.18;
+    // Punto de entrada: extremo del eje real que correlaciona con mayor elevacion (los
+    // chutes con avance por gravedad reciben el material por el lado mas alto).
+    var meanY = 0;
+    Object.keys(meshStates).forEach(function(k) { meanY += meshStates[k].worldCenter.y; });
+    meanY /= Object.keys(meshStates).length;
+    var corr = 0;
+    Object.keys(meshStates).forEach(function(k) {
+      var c = meshStates[k].worldCenter;
+      var p = (c.x - center.x) * axis.x + (c.y - center.y) * axis.y + (c.z - center.z) * axis.z;
+      corr += p * (c.y - meanY);
+    });
+    var entryProjSign = (corr >= 0) ? 1 : -1;
+    var entryProj = (entryProjSign < 0) ? range.min + (range.max - range.min) * 0.18 : range.max - (range.max - range.min) * 0.18;
+    // Solo se desplaza en el plano horizontal (X,Z), usando unicamente la componente
+    // horizontal del eje real -- si se usara el eje 3D completo (que incluye la pendiente
+    // del chute), este desplazamiento tambien alteraria entryStart.y, arruinando la altura
+    // ya fijada arriba (box.max.y + entryLength) de forma impredecible.
+    var axisHoriz = new THREE.Vector3(axis.x, 0, axis.z);
+    if (axisHoriz.lengthSq() < 1e-8) axisHoriz.set(1, 0, 0); else axisHoriz.normalize();
+    entryStart.x += axisHoriz.x * entryProj;
+    entryStart.z += axisHoriz.z * entryProj;
 
-    var markerLen = flowLength * 0.05;
+    var markerLen = ((range.max - range.min) * 0.9) * 0.05;
     var n = 4;
     for (var i = 0; i < n; i++) {
       var geo = makeFlatArrowGeometry();
       geo.rotateZ(-Math.PI / 2);
       geo.scale(markerLen, markerLen, markerLen);
-      var mat = new THREE.MeshBasicMaterial({ color: 0x639922, side: THREE.DoubleSide });
-      var mesh = new THREE.Mesh(geo, mat);
-      mesh.userData.offset = i / n;
-      scene.add(mesh);
-      entryMarkers.push(mesh);
+      var pair = makeArrowMarkerPair(geo);
+      pair.front.userData.offset = i / n;
+      scene.add(pair.front);
+      scene.add(pair.ghost);
+      entryMarkers.push(pair);
     }
+    return entryProjSign;
   }
 
   function updateFlowMarkers(t) {
     var speed = 0.15;
-    flowMarkers.forEach(function(m) {
-      var p = (t * speed + m.userData.offset) % 1;
-      m.position.copy(flowStart).addScaledVector(flowDir, p * flowLength);
+    flowMarkers.forEach(function(pair) {
+      var p = (t * speed + pair.front.userData.offset) % 1;
       var fade = Math.min(p * 6, (1 - p) * 6, 1);
-      m.material.opacity = 0.35 + fade * 0.65;
-      m.material.transparent = true;
+      var opacity = 0.35 + fade * 0.65;
+      pair.front.position.copy(flowStart).addScaledVector(flowDir, p * flowLength);
+      pair.front.material.opacity = opacity;
+      pair.ghost.position.copy(pair.front.position);
+      pair.ghost.material.opacity = opacity * GHOST_OPACITY_FACTOR;
     });
-    entryMarkers.forEach(function(m) {
-      var p = (t * speed + m.userData.offset) % 1;
-      m.position.copy(entryStart);
-      m.position.y = entryStart.y - p * entryLength;
+    entryMarkers.forEach(function(pair) {
+      var p = (t * speed + pair.front.userData.offset) % 1;
       var fade = Math.min(p * 6, (1 - p) * 6, 1);
-      m.material.opacity = 0.35 + fade * 0.65;
-      m.material.transparent = true;
+      var opacity = 0.35 + fade * 0.65;
+      pair.front.position.copy(entryStart);
+      pair.front.position.y = entryStart.y - p * entryLength;
+      pair.front.material.opacity = opacity;
+      pair.ghost.position.copy(pair.front.position);
+      pair.ghost.material.opacity = opacity * GHOST_OPACITY_FACTOR;
     });
   }
 
-  fb.get(fb.ref(fb.db, 'estados')).then(function(snapshot) {
-    var saved = snapshot.exists() ? snapshot.val() : {};
-
-    loader.load('./chute.glb', function(gltf) {
+  function startWithSaved(saved) {
+    loader.load(currentChute.modelo, function(gltf) {
       var model = gltf.scene;
       scene.add(model);
       model.updateMatrixWorld(true);
@@ -509,15 +1295,14 @@ function startApp() {
       camera.far = size * 100;
       camera.updateProjectionMatrix();
       updateCameraFromSpherical();
-      addFlowArrow(box);
-      addEntryArrow(box);
 
       model.traverse(function(child) {
         if (child.isMesh) {
-          var name = child.name.replace(/-1$/, '');
+          var name = resolvePieceName(child);
           var category = null;
-          if (name.indexOf(CATEGORIES.placas.prefix) === 0) category = 'placas';
-          else if (name.indexOf(CATEGORIES.estructura.prefix) === 0) category = 'estructura';
+          for (var ci = 0; ci < CATEGORY_ORDER.length; ci++) {
+            if (CATEGORIES[CATEGORY_ORDER[ci]].match(name)) { category = CATEGORY_ORDER[ci]; break; }
+          }
           if (!category) return;
           child.material = child.material.clone();
           child.material.side = THREE.DoubleSide;
@@ -545,41 +1330,432 @@ function startApp() {
 
           var savedState = (saved[child.name] && typeof saved[child.name].state === 'number') ? saved[child.name].state : 0;
           var savedTs = (saved[child.name] && saved[child.name].ts) ? saved[child.name].ts : null;
-          meshStates[child.name] = { mesh: child, state: savedState, label: name, category: category, worldCenter: worldCenter, ts: savedTs };
+          var savedApuntalado = !!(saved[child.name] && saved[child.name].apuntalado);
+          var savedSoldadura = (saved[child.name] && saved[child.name].soldadura) || '';
+          meshStates[child.name] = { mesh: child, state: savedState, label: name, category: category, worldCenter: worldCenter, ts: savedTs, apuntalado: savedApuntalado, soldadura: savedSoldadura };
         }
       });
 
-      buildTypeLabels();
+      buildCodeRemap();
+
+      var flowAxis = computeFlowAxis3D();
+      var entryProjSign = addEntryArrow(box, flowAxis);
+      addFlowArrow(box, flowAxis, entryProjSign);
+
       document.getElementById('loading').style.display = 'none';
       applyCategoryVisuals();
       animate();
 
-      fb.onValue(fb.ref(fb.db, 'estados'), function(snap) {
+      fb.onValue(fb.ref(fb.db, chuteFbPath), function(snap) {
         var data = snap.val() || {};
         var changed = false;
         Object.keys(data).forEach(function(k) {
           if (meshStates[k] && !dirtyKeys[k] && typeof data[k].state === 'number' && data[k].state !== meshStates[k].state) {
             meshStates[k].state = data[k].state;
             meshStates[k].ts = data[k].ts || meshStates[k].ts;
+            meshStates[k].apuntalado = !!data[k].apuntalado;
+            meshStates[k].soldadura = data[k].soldadura || '';
             changed = true;
           }
         });
         if (changed) applyCategoryVisuals();
       });
     }, undefined, function(err) {
-      console.error('Error completo cargando chute.glb:', err);
+      console.error('Error completo cargando el modelo 3D:', err);
       var msg = (err && err.message) ? err.message : (err && err.target && err.target.status ? ('HTTP ' + err.target.status) : JSON.stringify(err));
       document.getElementById('loading').textContent = 'Error cargando el modelo: ' + msg;
     });
+  }
+
+  // Lee el estado guardado del chute activo. Si la ruta nueva (por chute) todavia esta
+  // vacia y este chute tiene una ruta antigua asociada, se usa esa como respaldo para no
+  // perder el historial que ya hayan guardado los turnos antes de existir el selector.
+  fb.get(fb.ref(fb.db, chuteFbPath)).then(function(snapshot) {
+    if (snapshot.exists()) { startWithSaved(snapshot.val()); return; }
+    if (currentChute.legacyFirebasePath) {
+      fb.get(fb.ref(fb.db, currentChute.legacyFirebasePath)).then(function(legacySnap) {
+        startWithSaved(legacySnap.exists() ? legacySnap.val() : {});
+      }).catch(function() { startWithSaved({}); });
+    } else {
+      startWithSaved({});
+    }
   }).catch(function(err) {
     document.getElementById('loading').textContent = 'Error conectando a Firebase: ' + err.message;
   });
+
+  // Config fija de pernos por codigo de placa (no es por turno, se carga una sola vez).
+  fb.get(fb.ref(fb.db, pernosFbPath)).then(function(snap) {
+    pernosConfig = snap.exists() ? snap.val() : {};
+  }).catch(function() { pernosConfig = {}; });
+
+  // ==================== INJERTOS (parches soldados sobre estructura) ====================
+  // Cada injerto es un poligono plano anclado a una cara real de una pieza de estructura.
+  // No es config fija por tipo (como los pernos): cada parche es una intervencion real,
+  // con su propio espesor/soldadura, asi que se guarda uno por uno en Firebase, cada uno
+  // con su propia geometria (normal + punto + base 2D de la cara al momento de crearlo).
+  var patches = {};           // { patchId: { mesh, data } }
+  var patchesFbPath = 'injertos/' + chuteId;
+  var selectedPatchId = null;
+  var patchDragState = null;  // { patchId, plane, lastPoint, uAxis, vAxis }
+  var injertoPending = null;  // { meshKey, normal, facePoint, uAxis, vAxis } mientras se dibuja
+  var injertoPoints = [];     // [{x,y}] en pixeles del canvas de dibujo
+  var injertoStep = 1;
+
+  var PATCH_COLOR = 0xE24B4A;
+  var PATCH_OPACITY = 0.55;
+
+  function buildFaceBasis(normal) {
+    var helper = Math.abs(normal.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    var uAxis = new THREE.Vector3().crossVectors(helper, normal).normalize();
+    var vAxis = new THREE.Vector3().crossVectors(normal, uAxis).normalize();
+    return { uAxis: uAxis, vAxis: vAxis };
+  }
+
+  function vertexLetter(i) {
+    var s = '', n = i;
+    do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+    return s;
+  }
+
+  function buildPatchMesh(data) {
+    var normal = new THREE.Vector3(data.normal[0], data.normal[1], data.normal[2]);
+    var uAxis = new THREE.Vector3(data.uAxis[0], data.uAxis[1], data.uAxis[2]);
+    var vAxis = new THREE.Vector3(data.vAxis[0], data.vAxis[1], data.vAxis[2]);
+    var facePoint = new THREE.Vector3(data.facePoint[0], data.facePoint[1], data.facePoint[2]);
+
+    var shape = new THREE.Shape();
+    data.points2D.forEach(function(p, i) { if (i === 0) shape.moveTo(p[0], p[1]); else shape.lineTo(p[0], p[1]); });
+    shape.closePath();
+    var geo = new THREE.ShapeGeometry(shape);
+
+    var modelSize = modelBox ? modelBox.getSize(new THREE.Vector3()).length() : 1;
+    var m = new THREE.Matrix4().makeBasis(uAxis, vAxis, normal);
+    m.setPosition(facePoint.clone().addScaledVector(normal, modelSize * 0.0015));
+    geo.applyMatrix4(m);
+
+    var mat = new THREE.MeshBasicMaterial({ color: PATCH_COLOR, side: THREE.DoubleSide, transparent: true, opacity: PATCH_OPACITY });
+    var mesh = new THREE.Mesh(geo, mat);
+    mesh.userData.isPatch = true;
+    var edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x8a1f1e }));
+    mesh.add(edges);
+    if (data.offset) mesh.position.set(data.offset[0], data.offset[1], data.offset[2]);
+    return mesh;
+  }
+
+  function renderPatch(patchId, data) {
+    if (patches[patchId] && patches[patchId].mesh) scene.remove(patches[patchId].mesh);
+    var mesh = buildPatchMesh(data);
+    scene.add(mesh);
+    patches[patchId] = { mesh: mesh, data: data };
+  }
+
+  function loadPatchesFromFirebase() {
+    fb.onValue(fb.ref(fb.db, patchesFbPath), function(snap) {
+      var data = snap.val() || {};
+      var seen = {};
+      Object.keys(data).forEach(function(id) {
+        seen[id] = true;
+        if (patchDragState && patchDragState.patchId === id) return; // no pisar mientras se arrastra
+        renderPatch(id, data[id]);
+      });
+      Object.keys(patches).forEach(function(id) {
+        if (!seen[id]) {
+          scene.remove(patches[id].mesh);
+          delete patches[id];
+          if (selectedPatchId === id) deselectPatch();
+        }
+      });
+    });
+  }
+
+  var deleteBadgeEl = document.getElementById('injerto-delete-badge');
+
+  function selectPatch(patchId) { selectedPatchId = patchId; deleteBadgeEl.style.display = 'flex'; }
+  function deselectPatch() { selectedPatchId = null; deleteBadgeEl.style.display = 'none'; }
+
+  // Ancla el globo de borrar al vertice del parche que quede mas arriba-a-la-derecha en
+  // pantalla (proyectando cada vertice real, no una esquina de bounding box aproximada).
+  function updateDeleteBadgePosition() {
+    if (!selectedPatchId || !patches[selectedPatchId]) { deleteBadgeEl.style.display = 'none'; return; }
+    var mesh = patches[selectedPatchId].mesh;
+    var posAttr = mesh.geometry.attributes.position;
+    var best = null, bestScore = -Infinity;
+    for (var i = 0; i < posAttr.count; i++) {
+      var v = new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)).applyMatrix4(mesh.matrixWorld);
+      var proj = v.project(camera);
+      var score = proj.x - proj.y;
+      if (score > bestScore) { bestScore = score; best = proj; }
+    }
+    if (!best || best.z > 1) { deleteBadgeEl.style.display = 'none'; return; }
+    var rect = renderer.domElement.getBoundingClientRect();
+    deleteBadgeEl.style.left = (rect.left + (best.x * 0.5 + 0.5) * rect.width) + 'px';
+    deleteBadgeEl.style.top = (rect.top + (-best.y * 0.5 + 0.5) * rect.height) + 'px';
+    deleteBadgeEl.style.display = 'flex';
+  }
+
+  deleteBadgeEl.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (!selectedPatchId) return;
+    document.getElementById('injerto-delete-overlay').classList.add('open');
+  });
+  document.getElementById('btn-injerto-delete-cancel').addEventListener('click', function() {
+    document.getElementById('injerto-delete-overlay').classList.remove('open');
+  });
+  document.getElementById('btn-injerto-delete-confirm').addEventListener('click', function() {
+    if (selectedPatchId && patches[selectedPatchId]) {
+      var id = selectedPatchId;
+      var upd = {}; upd[id] = null;
+      fb.update(fb.ref(fb.db, patchesFbPath), upd).catch(function() {});
+      scene.remove(patches[id].mesh);
+      delete patches[id];
+    }
+    deselectPatch();
+    document.getElementById('injerto-delete-overlay').classList.remove('open');
+  });
+
+  // --- Arrastrar un parche seleccionado, restringido al plano real de su cara ---
+  function tryStartPatchDrag(e) {
+    if (!selectedPatchId || !patches[selectedPatchId]) return false;
+    var rect = renderer.domElement.getBoundingClientRect();
+    var mx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    var my = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(new THREE.Vector2(mx, my), camera);
+    var hit = raycaster.intersectObject(patches[selectedPatchId].mesh, false);
+    if (hit.length === 0) return false;
+    var data = patches[selectedPatchId].data;
+    var normal = new THREE.Vector3(data.normal[0], data.normal[1], data.normal[2]);
+    var plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, hit[0].point);
+    patchDragState = {
+      patchId: selectedPatchId, plane: plane, lastPoint: hit[0].point.clone(),
+      uAxis: new THREE.Vector3(data.uAxis[0], data.uAxis[1], data.uAxis[2]),
+      vAxis: new THREE.Vector3(data.vAxis[0], data.vAxis[1], data.vAxis[2])
+    };
+    renderer.domElement.setPointerCapture(e.pointerId);
+    return true;
+  }
+
+  function updatePatchDrag(e) {
+    if (!patchDragState) return false;
+    var rect = renderer.domElement.getBoundingClientRect();
+    var mx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    var my = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(new THREE.Vector2(mx, my), camera);
+    var hitPoint = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(patchDragState.plane, hitPoint)) return true;
+    var delta = hitPoint.clone().sub(patchDragState.lastPoint);
+    // Se proyecta el desplazamiento sobre uAxis/vAxis (no se usa el vector crudo) para que
+    // el parche quede siempre exactamente sobre el plano real de la cara, sin importar
+    // pequenos errores de punto flotante del raycast contra el plano.
+    var du = delta.dot(patchDragState.uAxis), dv = delta.dot(patchDragState.vAxis);
+    var constrained = patchDragState.uAxis.clone().multiplyScalar(du).addScaledVector(patchDragState.vAxis, dv);
+    patches[patchDragState.patchId].mesh.position.add(constrained);
+    patchDragState.lastPoint = hitPoint;
+    return true;
+  }
+
+  function endPatchDrag(e) {
+    if (!patchDragState) return false;
+    var patchId = patchDragState.patchId;
+    var mesh = patches[patchId].mesh;
+    var newOffset = [mesh.position.x, mesh.position.y, mesh.position.z];
+    patches[patchId].data.offset = newOffset;
+    fb.update(fb.ref(fb.db, patchesFbPath + '/' + patchId), { offset: newOffset }).catch(function() {});
+    patchDragState = null;
+    return true;
+  }
+
+  // --- Paso 1: dibujar el contorno punto por punto en un canvas 2D ---
+  var injertoCanvas = document.getElementById('injerto-draw-canvas');
+  var injertoCtx = injertoCanvas.getContext('2d');
+
+  function redrawInjertoCanvas() {
+    var w = injertoCanvas.width, h = injertoCanvas.height;
+    injertoCtx.clearRect(0, 0, w, h);
+    injertoCtx.fillStyle = '#f7f6f2';
+    injertoCtx.fillRect(0, 0, w, h);
+    if (injertoPoints.length === 0) return;
+    injertoCtx.strokeStyle = '#E24B4A';
+    injertoCtx.lineWidth = 2;
+    injertoCtx.beginPath();
+    injertoPoints.forEach(function(p, i) { if (i === 0) injertoCtx.moveTo(p.x, p.y); else injertoCtx.lineTo(p.x, p.y); });
+    if (injertoPoints.length >= 3) {
+      injertoCtx.lineTo(injertoPoints[0].x, injertoPoints[0].y);
+      injertoCtx.stroke();
+      injertoCtx.fillStyle = 'rgba(226,75,74,0.12)';
+      injertoCtx.fill();
+    } else {
+      injertoCtx.stroke();
+    }
+    injertoPoints.forEach(function(p, i) {
+      injertoCtx.beginPath();
+      injertoCtx.fillStyle = '#2C2C2A';
+      injertoCtx.arc(p.x, p.y, 9, 0, Math.PI * 2);
+      injertoCtx.fill();
+      injertoCtx.fillStyle = '#fff';
+      injertoCtx.font = 'bold 11px Arial';
+      injertoCtx.textAlign = 'center';
+      injertoCtx.textBaseline = 'middle';
+      injertoCtx.fillText(vertexLetter(i), p.x, p.y);
+    });
+  }
+
+  injertoCanvas.addEventListener('click', function(e) {
+    var rect = injertoCanvas.getBoundingClientRect();
+    injertoPoints.push({
+      x: (e.clientX - rect.left) * (injertoCanvas.width / rect.width),
+      y: (e.clientY - rect.top) * (injertoCanvas.height / rect.height)
+    });
+    redrawInjertoCanvas();
+    document.getElementById('btn-injerto-crear').disabled = injertoPoints.length < 3;
+  });
+  document.getElementById('btn-injerto-undo').addEventListener('click', function() {
+    injertoPoints.pop();
+    redrawInjertoCanvas();
+    document.getElementById('btn-injerto-crear').disabled = injertoPoints.length < 3;
+  });
+  document.getElementById('btn-injerto-restart').addEventListener('click', function() {
+    injertoPoints = [];
+    redrawInjertoCanvas();
+    document.getElementById('btn-injerto-crear').disabled = true;
+  });
+
+  // --- Paso 2: dimension real de cada segmento + datos de soldadura ---
+  function goToDimsStep() {
+    injertoStep = 2;
+    document.getElementById('injerto-step-draw').style.display = 'none';
+    document.getElementById('injerto-step-dims').style.display = 'block';
+    var listEl = document.getElementById('injerto-seg-list');
+    listEl.innerHTML = '';
+    var n = injertoPoints.length;
+    for (var i = 0; i < n; i++) {
+      var a = vertexLetter(i), b = vertexLetter((i + 1) % n);
+      var row = document.createElement('div');
+      row.className = 'injerto-seg-row';
+      row.innerHTML = '<span>' + a + '-' + b + '</span><input type="number" min="0" step="0.1" class="injerto-seg-input" placeholder="mm">';
+      listEl.appendChild(row);
+    }
+    document.getElementById('btn-injerto-crear').textContent = 'Crear parche';
+    document.getElementById('btn-injerto-crear').disabled = true;
+  }
+
+  function validateDimsStep() {
+    var inputs = document.querySelectorAll('.injerto-seg-input');
+    var allFilled = inputs.length > 0 && Array.prototype.every.call(inputs, function(inp) { return parseFloat(inp.value) > 0; });
+    var espesorOk = document.getElementById('injerto-espesor').value.trim().length > 0;
+    document.getElementById('btn-injerto-crear').disabled = !(allFilled && espesorOk);
+  }
+  document.getElementById('injerto-seg-list').addEventListener('input', validateDimsStep);
+  document.getElementById('injerto-espesor').addEventListener('input', validateDimsStep);
+
+  function createInjertoFromForm() {
+    var inputs = document.querySelectorAll('.injerto-seg-input');
+    var segMm = Array.prototype.map.call(inputs, function(inp) { return parseFloat(inp.value); });
+    var n = injertoPoints.length;
+
+    var pxLens = [];
+    for (var i = 0; i < n; i++) {
+      var p1 = injertoPoints[i], p2 = injertoPoints[(i + 1) % n];
+      pxLens.push(Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1);
+    }
+    // Factor de escala unico (promedio real/dibujado) para pasar el boceto a proporcion
+    // real preservando la forma/angulos dibujados. El dato exacto por segmento queda
+    // guardado igual como metadato para el informe, aunque el poligono 3D renderizado sea
+    // una aproximacion a escala uniforme del boceto -- esto documenta terreno, no es un
+    // acotado de precision tipo CAD.
+    var scaleMPerPx = (segMm.reduce(function(sum, mm, i) { return sum + mm / pxLens[i]; }, 0) / n) / 1000;
+
+    var cx = injertoPoints.reduce(function(s, p) { return s + p.x; }, 0) / n;
+    var cy = injertoPoints.reduce(function(s, p) { return s + p.y; }, 0) / n;
+    var points2D = injertoPoints.map(function(p) {
+      return [(p.x - cx) * scaleMPerPx, -(p.y - cy) * scaleMPerPx];
+    });
+
+    var pending = injertoPending;
+    var data = {
+      meshKey: pending.meshKey,
+      normal: [pending.normal.x, pending.normal.y, pending.normal.z],
+      facePoint: [pending.facePoint.x, pending.facePoint.y, pending.facePoint.z],
+      uAxis: [pending.uAxis.x, pending.uAxis.y, pending.uAxis.z],
+      vAxis: [pending.vAxis.x, pending.vAxis.y, pending.vAxis.z],
+      points2D: points2D,
+      vertexLabels: injertoPoints.map(function(_, i) { return vertexLetter(i); }),
+      segmentDims: segMm.map(function(mm, i) { return { seg: vertexLetter(i) + '-' + vertexLetter((i + 1) % n), mm: mm }; }),
+      espesor: document.getElementById('injerto-espesor').value.trim(),
+      proceso: document.getElementById('injerto-proceso').value,
+      electrodo: document.getElementById('injerto-electrodo').value.trim(),
+      turno: turnoLabels[parseInt(turnoSelect.value, 10)],
+      ts: Date.now()
+    };
+
+    var statusEl = document.getElementById('injerto-save-status');
+    statusEl.textContent = 'Guardando...';
+    var newKey = fb.push(fb.ref(fb.db, patchesFbPath)).key;
+    var upd = {}; upd[newKey] = data;
+    fb.update(fb.ref(fb.db, patchesFbPath), upd).then(function() {
+      renderPatch(newKey, data);
+      closeInjertoModal();
+    }).catch(function(err) {
+      statusEl.textContent = 'Error al guardar: ' + err.message;
+    });
+  }
+
+  function closeInjertoModal() {
+    document.getElementById('injerto-modal-overlay').classList.remove('open');
+    injertoPending = null;
+    injertoPoints = [];
+    injertoStep = 1;
+    document.getElementById('injerto-step-draw').style.display = 'block';
+    document.getElementById('injerto-step-dims').style.display = 'none';
+    document.getElementById('btn-injerto-crear').textContent = 'Siguiente';
+    document.getElementById('btn-injerto-crear').disabled = true;
+    document.getElementById('injerto-espesor').value = '';
+    document.getElementById('injerto-electrodo').value = '';
+    document.getElementById('injerto-save-status').textContent = '';
+    redrawInjertoCanvas();
+  }
+  document.getElementById('injerto-modal-close').addEventListener('click', closeInjertoModal);
+  document.getElementById('injerto-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeInjertoModal();
+  });
+  document.getElementById('btn-injerto-crear').addEventListener('click', function() {
+    if (injertoStep === 1) { goToDimsStep(); return; }
+    createInjertoFromForm();
+  });
+
+  function openInjertoModalForFace(meshKey, intersect) {
+    var normal = intersect.face.normal.clone().transformDirection(intersect.object.matrixWorld).normalize();
+    var basis = buildFaceBasis(normal);
+    injertoPending = { meshKey: meshKey, normal: normal, facePoint: intersect.point.clone(), uAxis: basis.uAxis, vAxis: basis.vAxis };
+    injertoPoints = [];
+    injertoStep = 1;
+    document.getElementById('injerto-step-draw').style.display = 'block';
+    document.getElementById('injerto-step-dims').style.display = 'none';
+    document.getElementById('btn-injerto-crear').textContent = 'Siguiente';
+    document.getElementById('btn-injerto-crear').disabled = true;
+    redrawInjertoCanvas();
+    document.getElementById('injerto-modal-overlay').classList.add('open');
+  }
+
+  loadPatchesFromFirebase();
 
   renderer.domElement.addEventListener('click', function(e) {
     var rect = renderer.domElement.getBoundingClientRect();
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
+
+    var inInjertoView = CATEGORIES[activeCategory].mode !== 'estado';
+    if (inInjertoView) {
+      var patchMeshes = Object.keys(patches).map(function(id) { return patches[id].mesh; });
+      var patchHits = patchMeshes.length ? raycaster.intersectObjects(patchMeshes, false) : [];
+      if (patchHits.length > 0) {
+        var hitId = Object.keys(patches).find(function(id) { return patches[id].mesh === patchHits[0].object; });
+        selectPatch(hitId);
+        return;
+      }
+    }
+    if (selectedPatchId) deselectPatch();
+
     var activeMeshes = Object.keys(meshStates)
       .filter(function(k) { return meshStates[k].category === activeCategory; })
       .map(function(k) { return meshStates[k].mesh; });
@@ -588,16 +1764,23 @@ function startApp() {
       var picked = intersects[0].object;
       var entry = meshStates[picked.name];
       var cat = CATEGORIES[entry.category];
+      if (cat.mode !== 'estado') {
+        openInjertoModalForFace(picked.name, intersects[0]);
+        return;
+      }
       entry.state = (entry.state + 1) % cat.states.length;
       picked.material.color.setHex(cat.states[entry.state].color);
       dirtyKeys[picked.name] = true;
       renderCounts();
       updateSaveButton();
 
-      var info = document.getElementById('selected-info');
-      info.style.display = 'block';
-      document.getElementById('sel-name').textContent = entry.label;
-      document.getElementById('sel-state').textContent = cat.states[entry.state].name;
+      if (entry.state === 0) {
+        entry.apuntalado = false;
+        entry.soldadura = '';
+        showAutoFadeInfo(entry.label, cat.states[entry.state].name);
+      } else {
+        showInterventionForm(picked.name, entry, cat.states[entry.state].name);
+      }
     }
   });
 
@@ -618,11 +1801,11 @@ function startApp() {
     var payload = {};
     keys.forEach(function(k) {
       var e = meshStates[k];
-      payload[k] = { state: e.state, category: e.category, turno: turno, turnoIdx: turnoIdx, ts: nowTs };
+      payload[k] = { state: e.state, category: e.category, turno: turno, turnoIdx: turnoIdx, ts: nowTs, apuntalado: !!e.apuntalado, soldadura: e.soldadura || '' };
     });
     var statusEl = document.getElementById('save-status');
     statusEl.textContent = 'Guardando...';
-    fb.update(fb.ref(fb.db, 'estados'), payload).then(function() {
+    fb.update(fb.ref(fb.db, chuteFbPath), payload).then(function() {
       keys.forEach(function(k) { meshStates[k].ts = nowTs; });
       dirtyKeys = {};
       updateSaveButton();
@@ -632,7 +1815,203 @@ function startApp() {
     });
   });
 
-  var urlParams = new URLSearchParams(window.location.search);
+  // --- Modal de configuracion de pernos por codigo de placa ---
+  // Dimensiones reales de la pieza en mm. El bounding box de la geometria esta en espacio
+  // LOCAL (sin la escala acumulada de los nodos padre), por eso se multiplica por la escala
+  // real extraida de matrixWorld (ignorando la rotacion, para no distorsionar un bounding
+  // box alineado a ejes). Ademas la especificacion glTF define sus unidades siempre en
+  // metros, sin importar en que unidad se modelo originalmente en SolidWorks -- por eso se
+  // multiplica x1000 al final para pasar a mm.
+  function plateDimsMm(mesh) {
+    var geo = mesh.geometry;
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    var localSize = new THREE.Vector3();
+    geo.boundingBox.getSize(localSize);
+    var worldScale = new THREE.Vector3();
+    mesh.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), worldScale);
+    var realSizeMeters = localSize.multiply(worldScale);
+    return [Math.abs(realSizeMeters.x), Math.abs(realSizeMeters.y), Math.abs(realSizeMeters.z)]
+      .map(function(v) { return Math.round(v * 1000); })
+      .sort(function(a, b) { return b - a; });
+  }
+
+  // Solo categorias en modo "estado" tienen especificacion de pernos -- las de modo
+  // "injerto" (parches soldados) no se agrupan por codigo de esta forma.
+  function collectPlateCodes() {
+    var groups = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      if (CATEGORIES[e.category].mode !== 'estado') return;
+      var code = getPlateCode(e.label);
+      if (!groups[code]) groups[code] = { count: 0, category: e.category, sample: e };
+      groups[code].count++;
+    });
+    return groups;
+  }
+
+  // El formulario se genera a partir de PERNOS_SCHEMA (definido por chute), no de campos
+  // fijos -- cada chute puede pedir datos distintos (ver CHUTES_CONFIG.pernosSchema).
+  function buildPernosRow(code, groupInfo) {
+    var cfg = pernosConfig[code] || {};
+    var dims = plateDimsMm(groupInfo.sample.mesh);
+    var catLabel = CATEGORIES[groupInfo.category].label;
+    var row = document.createElement('div');
+    row.className = 'pernos-row';
+    row.dataset.code = code;
+    row.dataset.dims = dims.join('x');
+
+    var title = document.createElement('div');
+    title.className = 'pernos-row-title';
+    title.innerHTML = '<strong>' + code + '</strong><span>' + catLabel + ' &middot; x' + groupInfo.count +
+      ' en el chute &middot; placa aprox. ' + dims[0] + '&times;' + dims[1] + '&times;' + dims[2] + ' mm</span>';
+    row.appendChild(title);
+
+    var grid = document.createElement('div');
+    grid.className = 'pernos-grid';
+    row.appendChild(grid);
+
+    var checksWrap = document.createElement('div');
+    checksWrap.className = 'pernos-checks';
+    row.appendChild(checksWrap);
+
+    var sistemaSelect = null, gradoSelect = null, iconCanvas = null;
+
+    var visibleFields = PERNOS_SCHEMA.filter(function(f) {
+      return !(f.hideFor && f.hideFor.indexOf(groupInfo.category) !== -1);
+    });
+
+    visibleFields.forEach(function(field) {
+      if (field.type === 'checkbox') {
+        var lbl = document.createElement('label');
+        var chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.className = 'pf-field';
+        chk.dataset.key = field.key;
+        chk.checked = !!cfg[field.key];
+        lbl.appendChild(chk);
+        lbl.appendChild(document.createTextNode(' ' + field.label));
+        checksWrap.appendChild(lbl);
+        return;
+      }
+
+      var cell = document.createElement('div');
+      var lblEl = document.createElement('label');
+      lblEl.textContent = field.label;
+      cell.appendChild(lblEl);
+
+      if (field.type === 'select') {
+        var sel = document.createElement('select');
+        sel.className = 'pf-field';
+        sel.dataset.key = field.key;
+        field.options.forEach(function(o) {
+          var val = Array.isArray(o) ? o[0] : o;
+          var txt = Array.isArray(o) ? o[1] : o;
+          var opt = document.createElement('option');
+          opt.value = val; opt.textContent = txt;
+          sel.appendChild(opt);
+        });
+        sel.value = cfg[field.key] || sel.options[0].value;
+        cell.appendChild(sel);
+        if (field.key === 'sistema') sistemaSelect = sel;
+      } else if (field.type === 'number') {
+        var numInput = document.createElement('input');
+        numInput.type = 'number'; numInput.min = '0'; numInput.step = '1';
+        numInput.className = 'pf-field'; numInput.dataset.key = field.key;
+        numInput.value = (cfg[field.key] != null) ? cfg[field.key] : '';
+        cell.appendChild(numInput);
+      } else if (field.type === 'text') {
+        var txtInput = document.createElement('input');
+        txtInput.type = 'text';
+        txtInput.className = 'pf-field'; txtInput.dataset.key = field.key;
+        if (field.placeholder) txtInput.placeholder = field.placeholder;
+        txtInput.value = cfg[field.key] || '';
+        cell.appendChild(txtInput);
+      } else if (field.type === 'grado') {
+        var gradoSel = document.createElement('select');
+        gradoSel.className = 'pf-field'; gradoSel.dataset.key = field.key;
+        cell.appendChild(gradoSel);
+        gradoSelect = gradoSel;
+
+        var iconCell = document.createElement('div');
+        iconCell.className = 'grade-icon-wrap';
+        var canvas = document.createElement('canvas');
+        canvas.width = 34; canvas.height = 34; canvas.className = 'pf-icon';
+        var iconLbl = document.createElement('span');
+        iconLbl.style.cssText = 'font-size:10.5px;color:#888;';
+        iconLbl.textContent = 'Marca de cabeza';
+        iconCell.appendChild(canvas); iconCell.appendChild(iconLbl);
+        grid.appendChild(iconCell);
+        iconCanvas = canvas;
+      }
+      grid.appendChild(cell);
+    });
+
+    if (gradoSelect) {
+      var refreshGradoOptions = function(selected) {
+        var sistemaVal = sistemaSelect ? sistemaSelect.value : 'imperial';
+        var opts = sistemaVal === 'metrico'
+          ? ['4.6', '4.8', '5.6', '5.8', '8.8', '9.8', '10.9', '12.9', 'Otro']
+          : ['Grado 2', 'Grado 5', 'Grado 8', 'Otro'];
+        gradoSelect.innerHTML = opts.map(function(o) { return '<option value="' + o + '">' + o + '</option>'; }).join('');
+        if (selected && opts.indexOf(selected) !== -1) gradoSelect.value = selected;
+        if (iconCanvas) drawBoltGradeIcon(iconCanvas, sistemaVal, gradoSelect.value);
+      };
+      refreshGradoOptions(cfg.grado);
+      if (sistemaSelect) sistemaSelect.addEventListener('change', function() { refreshGradoOptions(); });
+      var iconCanvasRef = iconCanvas;
+      gradoSelect.addEventListener('change', function() {
+        if (iconCanvasRef) drawBoltGradeIcon(iconCanvasRef, sistemaSelect ? sistemaSelect.value : 'imperial', gradoSelect.value);
+      });
+    }
+
+    return row;
+  }
+
+  function openPernosModal() {
+    var body = document.getElementById('pernos-modal-body');
+    body.innerHTML = '';
+    var groups = collectPlateCodes();
+    var codes = Object.keys(groups).sort();
+    if (codes.length === 0) {
+      body.innerHTML = '<p style="font-size:12px;color:#888;">El modelo 3D todavia no termina de cargar. Intenta de nuevo en un momento.</p>';
+    } else {
+      codes.forEach(function(code) { body.appendChild(buildPernosRow(code, groups[code])); });
+    }
+    document.getElementById('pernos-save-status').textContent = '';
+    document.getElementById('pernos-modal-overlay').classList.add('open');
+  }
+  function closePernosModal() { document.getElementById('pernos-modal-overlay').classList.remove('open'); }
+
+  document.getElementById('btn-pernos').addEventListener('click', openPernosModal);
+  document.getElementById('pernos-modal-close').addEventListener('click', closePernosModal);
+  document.getElementById('pernos-modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closePernosModal();
+  });
+
+  document.getElementById('btn-pernos-guardar').addEventListener('click', function() {
+    var rows = document.querySelectorAll('#pernos-modal-body .pernos-row');
+    if (rows.length === 0) return;
+    var payload = {};
+    rows.forEach(function(row) {
+      var data = { dimsMm: row.dataset.dims };
+      row.querySelectorAll('.pf-field').forEach(function(el) {
+        var key = el.dataset.key;
+        if (el.type === 'checkbox') data[key] = el.checked;
+        else if (el.type === 'number') data[key] = parseInt(el.value, 10) || 0;
+        else data[key] = el.value;
+      });
+      payload[row.dataset.code] = data;
+    });
+    var statusEl = document.getElementById('pernos-save-status');
+    statusEl.textContent = 'Guardando...';
+    fb.update(fb.ref(fb.db, pernosFbPath), payload).then(function() {
+      Object.keys(payload).forEach(function(code) { pernosConfig[code] = payload[code]; });
+      statusEl.textContent = 'Guardado ' + new Date().toLocaleTimeString();
+    }).catch(function(err) {
+      statusEl.textContent = 'Error al guardar: ' + err.message;
+    });
+  });
+
   var turnoLabels = [];
   try {
     var turnosParam = urlParams.get('turnos');
@@ -655,8 +2034,8 @@ function startApp() {
   var clock = new THREE.Clock();
   function animate() {
     requestAnimationFrame(animate);
-    updateTypeLabelPositions();
     updateFlowMarkers(clock.getElapsedTime());
+    updateDeleteBadgePosition();
     renderer.render(scene, camera);
   }
 
@@ -778,6 +2157,53 @@ function startApp() {
     return { dataUrl: dataUrl, aspect: aspect };
   }
 
+  // Vista isometrica de un tipo de placa (todas las piezas con el mismo codigo), para el
+  // bloque de especificaciones de pernos del informe: encuadra la camara en su bounding
+  // box y atenua el resto del modelo para que se lea claro cual es la pieza referenciada.
+  function snapshotPlateType(code) {
+    var keys = Object.keys(meshStates).filter(function(k) { return getPlateCode(meshStates[k].label) === code; });
+    if (keys.length === 0) return { dataUrl: null, aspect: 1.3 };
+
+    var box = new THREE.Box3();
+    keys.forEach(function(k) { box.expandByObject(meshStates[k].mesh); });
+    var center = box.getCenter(new THREE.Vector3());
+    var size = box.getSize(new THREE.Vector3()).length() || 1;
+
+    var savedOpacity = {}, savedTransparent = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      savedOpacity[k] = e.mesh.material.opacity;
+      savedTransparent[k] = e.mesh.material.transparent;
+      var show = keys.indexOf(k) !== -1;
+      e.mesh.material.transparent = true;
+      e.mesh.material.opacity = show ? 1 : 0.04;
+    });
+
+    var savedTarget = target.clone();
+    var savedTheta = spherical.theta, savedPhi = spherical.phi, savedRadius = spherical.radius;
+    target.copy(center);
+    spherical.theta = Math.PI / 4;
+    spherical.phi = Math.PI / 3;
+    spherical.radius = size * 1.6;
+    updateCameraFromSpherical();
+
+    var result = captureAtAspect(1.3, function() {
+      renderer.render(scene, camera);
+      return renderer.domElement.toDataURL('image/png');
+    });
+
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      e.mesh.material.opacity = savedOpacity[k];
+      e.mesh.material.transparent = savedTransparent[k];
+    });
+    target.copy(savedTarget);
+    spherical.theta = savedTheta; spherical.phi = savedPhi; spherical.radius = savedRadius;
+    updateCameraFromSpherical();
+    renderer.render(scene, camera);
+    return result;
+  }
+
   function generatePdfReport() {
     var jsPDFCtor = window.jspdf ? window.jspdf.jsPDF : null;
     if (!jsPDFCtor) { alert('No se pudo cargar el generador de PDF. Revisa tu conexion a internet.'); return; }
@@ -798,6 +2224,8 @@ function startApp() {
     var C_LINE = [225, 223, 216];
     var C_BG = [246, 245, 241];
 
+    var ESTADO_CATEGORIES = CATEGORY_ORDER.filter(function(k) { return CATEGORIES[k].mode === 'estado'; });
+
     function countsFor(category, sideFilterFn) {
       var counts = {};
       CATEGORIES[category].states.forEach(function(s) { counts[s.name] = 0; });
@@ -808,36 +2236,38 @@ function startApp() {
       return counts;
     }
 
-    var countsPlacas = countsFor('placas', function() { return true; });
-    var countsEstructura = countsFor('estructura', function() { return true; });
-    var countsPlacasIzq = countsFor('placas', isIzq);
-    var countsPlacasDer = countsFor('placas', isDer);
-    var countsEstructIzq = countsFor('estructura', isIzq);
-    var countsEstructDer = countsFor('estructura', isDer);
-    var countsEstructCentral = countsFor('estructura', isCentral);
+    var countsByCategory = {};
+    ESTADO_CATEGORIES.forEach(function(catKey) { countsByCategory[catKey] = countsFor(catKey, function() { return true; }); });
 
-    // --- Franja central de estructura (clip 3D, isometrico) ---
-    var centerZ = modelBox ? (modelBox.min.z + modelBox.max.z) / 2 : 0;
-    var band = modelBox ? (modelBox.max.z - modelBox.min.z) * 0.18 : 0.2;
-    var clipKeepCentral = [
-      new THREE.Plane(new THREE.Vector3(0,0,-1), centerZ + band),
-      new THREE.Plane(new THREE.Vector3(0,0,1), -(centerZ - band))
-    ];
+    // --- Capturas de corte por pared (solo chutes con esa convencion, ej. CV-201) ---
+    var wallImages = null;
+    if (currentChute.pdfWallElevation) {
+      wallImages = {};
+      ESTADO_CATEGORIES.forEach(function(catKey) {
+        wallImages[catKey] = {
+          izq: snapshotWallElevation(catKey, -1),
+          der: snapshotWallElevation(catKey, 1),
+          countsIzq: countsFor(catKey, isIzq),
+          countsDer: countsFor(catKey, isDer)
+        };
+      });
+    }
+    var imgEstructCentral = (currentChute.pdfWallElevation && CATEGORIES.estructura)
+      ? snapshotView(defaultSpherical.theta, defaultSpherical.phi, 1.25, function(e) { return e.category==='estructura' && e.state!==0 && isCentral(e); }, [], 1.7)
+      : null;
+    var countsEstructCentral = currentChute.pdfWallElevation && CATEGORIES.estructura ? countsFor('estructura', isCentral) : null;
 
-    // --- Capturas (todas devuelven {dataUrl, aspect}, sin distorsion) ---
-    var imgPlacasIzq = snapshotWallElevation('placas', -1);
-    var imgPlacasDer = snapshotWallElevation('placas', 1);
-    var imgEstructIzq = snapshotWallElevation('estructura', -1);
-    var imgEstructDer = snapshotWallElevation('estructura', 1);
-    var imgEstructCentral = snapshotView(defaultSpherical.theta, defaultSpherical.phi, 1.25, function(e) { return e.category==='estructura' && e.state!==0 && isCentral(e); }, [], 1.7);
-
-    // --- Conclusion legible ---
-    var totalPlacasCambio = countsPlacas['Cambio'] || 0;
-    var totalPlacasVolteo = countsPlacas['Volteo'] || 0;
-    var totalPlacasProx = countsPlacas['Proxima mantencion'] || 0;
-    var totalEstructCambio = countsEstructura['Cambio'] || 0;
-    var totalEstructProx = countsEstructura['Proximo a cambio'] || 0;
-    var totalCambiosGeneral = totalPlacasCambio + totalPlacasVolteo + totalEstructCambio;
+    // --- Conclusion legible: suma cambios de todas las categorias en modo estado ---
+    var totalCambiosGeneral = 0;
+    var resumenPorCategoria = ESTADO_CATEGORIES.map(function(catKey) {
+      var counts = countsByCategory[catKey];
+      var cat = CATEGORIES[catKey];
+      var parts = cat.states.slice(1).map(function(s) {
+        totalCambiosGeneral += (counts[s.name] || 0);
+        return (counts[s.name] || 0) + ' ' + s.name.toLowerCase();
+      });
+      return cat.label + ': ' + parts.join(', ');
+    }).join('. ');
 
     // --- Rango de fechas real de las modificaciones (basado en los ts guardados) ---
     var allTs = Object.keys(meshStates)
@@ -853,12 +2283,10 @@ function startApp() {
     }
     var rangoFechas = (fechaDesde === fechaHasta) ? fechaDesde : (fechaDesde + '  al  ' + fechaHasta);
 
+    var otLinea = (OT_NUMERO || OT_NOMBRE) ? (' (OT ' + OT_NUMERO + ' - ' + OT_NOMBRE + ')') : '';
     var conclusion = 'Entre el ' + rangoFechas + ' se registraron ' + totalCambiosGeneral +
-      ' intervenciones en el chute de alimentacion CV-201 (OT ' + OT_NUMERO + ' - ' + OT_NOMBRE + '). En placas guia se realizaron ' +
-      totalPlacasCambio + ' cambio(s) y ' + totalPlacasVolteo + ' volteo(s), quedando ' +
-      totalPlacasProx + ' placa(s) marcada(s) para proxima mantencion. En la estructura se registraron ' +
-      totalEstructCambio + ' cambio(s), con ' + totalEstructProx + ' elemento(s) marcado(s) para proximo cambio. ' +
-      'Se recomienda dar seguimiento a los elementos marcados como proxima mantencion en la siguiente parada.';
+      ' intervenciones en el ' + currentChute.nombre + otLinea + '. ' + resumenPorCategoria + '. ' +
+      'Se recomienda dar seguimiento a los elementos marcados para la siguiente parada.';
 
     var doc = new jsPDFCtor({ unit: 'mm', format: 'a4' });
     var pageW = 210, pageH = 297;
@@ -908,7 +2336,7 @@ function startApp() {
     doc.text('Informe de inspeccion', margin, 22);
     doc.setFontSize(14);
     doc.setFont(undefined, 'normal');
-    doc.text('Chute de alimentacion CV-201', margin, 31);
+    doc.text(currentChute.nombre, margin, 31);
     doc.setFontSize(9.5);
     doc.text('Mineria Escondida - BHP  ·  Contratista Dimarza', margin, 39);
     doc.setFontSize(8.5);
@@ -924,7 +2352,8 @@ function startApp() {
     doc.text('Modificaciones realizadas', margin + 6, y + 16);
     doc.text('G.A.P. placa guia - correa', margin + 6, y + 24);
     doc.setFont(undefined, 'normal');
-    var otLine = doc.splitTextToSize(OT_NUMERO + '  -  ' + OT_NOMBRE, contentW - 60);
+    var otTexto = (OT_NUMERO || OT_NOMBRE) ? (OT_NUMERO + '  -  ' + OT_NOMBRE) : 'No especificado';
+    var otLine = doc.splitTextToSize(otTexto, contentW - 60);
     doc.text(otLine, margin + 55, y + 8);
     doc.text(rangoFechas, margin + 55, y + 16);
     doc.text(gapVal, margin + 55, y + 24);
@@ -936,6 +2365,7 @@ function startApp() {
     y += splitConclusion.length * 4.6 + 8;
 
     // --- Tarjetas de conteo (estilo KPI) ---
+    var PDF_COLOR_MAP = { steel: C_STEEL, green: C_GREEN, red: C_RED, yellow: C_YELLOW };
     function statCards(states, counts, startY) {
       var n = states.length;
       var gap = 4;
@@ -943,9 +2373,7 @@ function startApp() {
       var cardH = 20;
       states.forEach(function(s, i) {
         var cx = margin + i * (cardW + gap);
-        var color = s.name === 'Cambio' ? C_GREEN : s.name === 'Volteo' ? C_RED :
-                    (s.name.indexOf('Proxima') === 0 || s.name.indexOf('Proximo') === 0) ? C_YELLOW :
-                    C_STEEL;
+        var color = PDF_COLOR_MAP[s.pdfColor] || C_STEEL;
         doc.setFillColor.apply(doc, C_BG);
         doc.roundedRect(cx, startY, cardW, cardH, 1.5, 1.5, 'F');
         doc.setFillColor.apply(doc, color);
@@ -963,15 +2391,13 @@ function startApp() {
       return startY + cardH + 10;
     }
 
-    ensureSpace(40);
-    sectionHeader('Conteo general - Placas guia');
-    y = statCards(CATEGORIES.placas.states, countsPlacas, y);
+    ESTADO_CATEGORIES.forEach(function(catKey) {
+      ensureSpace(40);
+      sectionHeader('Conteo general - ' + CATEGORIES[catKey].label);
+      y = statCards(CATEGORIES[catKey].states, countsByCategory[catKey], y);
+    });
 
-    ensureSpace(40);
-    sectionHeader('Conteo general - Estructura');
-    y = statCards(CATEGORIES.estructura.states, countsEstructura, y);
-
-    // ================= FOTOS: PLACAS GUIA =================
+    // ================= FOTOS: CORTE POR PARED (solo chutes con esa convencion) =================
     function photoWithStats(title, img, states, counts) {
       var maxW = contentW;
       var maxH = 105;
@@ -1000,17 +2426,17 @@ function startApp() {
       y += 10;
     }
 
-    newPage();
-    sectionHeader('Placas guia cambiadas (vista de corte, segun sentido de carga)');
-    photoWithStats('Pared izquierda', imgPlacasIzq, CATEGORIES.placas.states, countsPlacasIzq);
-    photoWithStats('Pared derecha', imgPlacasDer, CATEGORIES.placas.states, countsPlacasDer);
-
-    // ================= FOTOS: ESTRUCTURA =================
-    newPage();
-    sectionHeader('Estructura cambiada (vista de corte, segun sentido de carga)');
-    photoWithStats('Pared izquierda', imgEstructIzq, CATEGORIES.estructura.states, countsEstructIzq);
-    photoWithStats('Pared derecha', imgEstructDer, CATEGORIES.estructura.states, countsEstructDer);
-    photoWithStats('Zona central (vista isometrica)', imgEstructCentral, CATEGORIES.estructura.states, countsEstructCentral);
+    if (wallImages) {
+      ESTADO_CATEGORIES.forEach(function(catKey) {
+        newPage();
+        sectionHeader(CATEGORIES[catKey].label + ' cambiadas (vista de corte, segun sentido de carga)');
+        photoWithStats('Pared izquierda', wallImages[catKey].izq, CATEGORIES[catKey].states, wallImages[catKey].countsIzq);
+        photoWithStats('Pared derecha', wallImages[catKey].der, CATEGORIES[catKey].states, wallImages[catKey].countsDer);
+        if (catKey === 'estructura' && imgEstructCentral) {
+          photoWithStats('Zona central (vista isometrica)', imgEstructCentral, CATEGORIES.estructura.states, countsEstructCentral);
+        }
+      });
+    }
 
     // ================= DETALLE =================
     function detailList(catKey, catDef) {
@@ -1022,8 +2448,7 @@ function startApp() {
       sectionHeader('Detalle de cambios - ' + catDef.label);
       items.forEach(function(e) {
         ensureSpace(5);
-        var color = catDef.states[e.state].name === 'Cambio' ? C_GREEN :
-                    catDef.states[e.state].name === 'Volteo' ? C_RED : C_YELLOW;
+        var color = PDF_COLOR_MAP[catDef.states[e.state].pdfColor] || C_YELLOW;
         doc.setFillColor.apply(doc, color);
         doc.circle(margin + 1.2, y - 1.3, 1.2, 'F');
         doc.setFontSize(9);
@@ -1035,11 +2460,160 @@ function startApp() {
 
     newPage();
     sectionHeader('Detalle completo de cambios');
-    detailList('placas', CATEGORIES.placas);
-    detailList('estructura', CATEGORIES.estructura);
+    ESTADO_CATEGORIES.forEach(function(catKey) { detailList(catKey, CATEGORIES[catKey]); });
+
+    // ================= ESPECIFICACIONES DE PERNOS POR TIPO DE PLACA =================
+    // Izquierda: vista isometrica del tipo de placa. Derecha: dimension (del modelo 3D) +
+    // todos los datos de perno cargados en "Configurar pernos" + resumen de apuntalamiento
+    // de las piezas de ese codigo que fueron intervenidas en esta parada.
+    function pernosSection() {
+      var groups = collectPlateCodes();
+      var codes = Object.keys(groups).sort();
+      if (codes.length === 0) return;
+
+      newPage();
+      sectionHeader('Especificaciones de pernos por tipo de placa');
+
+      ensureSpace(14);
+      doc.setFontSize(8.5);
+      doc.setFont(undefined, 'italic');
+      doc.setTextColor(120, 120, 120);
+      doc.text(
+        'Referencia de marcas de cabeza (esquema, no fotografia). SAE: 0 lineas = Grado 2, 3 lineas = Grado 5, 6 lineas = Grado 8. Metrico: numero de clase estampado (ej. 8.8, 10.9, 12.9).',
+        margin, y, { maxWidth: contentW }
+      );
+      y += 10;
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(0, 0, 0);
+
+      // Checkbox dibujado a mano (cuadrado relleno + tilde blanca si esta marcado, cuadrado
+      // vacio si no) -- mas claro y compacto que escribir "Si"/"No" como texto.
+      function drawPdfCheckbox(x, yBase, checked) {
+        var s = 3.4;
+        var top = yBase - s + 0.6;
+        doc.setLineWidth(0.3);
+        doc.setDrawColor(120, 120, 120);
+        if (checked) { doc.setFillColor.apply(doc, C_GREEN); doc.rect(x, top, s, s, 'FD'); }
+        else { doc.setFillColor(255, 255, 255); doc.rect(x, top, s, s, 'FD'); }
+        if (checked) {
+          doc.setDrawColor(255, 255, 255);
+          doc.setLineWidth(0.55);
+          doc.line(x + 0.7, top + 1.9, x + 1.4, top + 2.7);
+          doc.line(x + 1.4, top + 2.7, x + 2.8, top + 0.7);
+        }
+        doc.setDrawColor(0, 0, 0);
+      }
+
+      codes.forEach(function(code) {
+        var g = groups[code];
+        var cfg = pernosConfig[code];
+        var img = snapshotPlateType(code);
+        var imgW = contentW * 0.42;
+        var imgH = imgW / (img.aspect || 1.3);
+
+        var schemaFields = cfg ? PERNOS_SCHEMA.filter(function(f) {
+          return !(f.hideFor && f.hideFor.indexOf(g.category) !== -1) && !(f.type === 'select' && f.key === 'sistema');
+        }) : [];
+
+        // Ancho de la columna de etiquetas segun el texto real mas largo de este bloque
+        // (evita que etiquetas largas, ej. "Se uso arandela de presion:", se encimen con
+        // el valor -- antes era un offset fijo que no alcanzaba para las mas largas).
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'bold');
+        var allLabels = ['Dimension placa', 'Apuntalamiento'].concat(schemaFields.map(function(f) { return f.label; }));
+        var labelW = Math.max.apply(null, allLabels.map(function(l) { return doc.getTextWidth(l + ':'); })) + 4;
+
+        ensureSpace(Math.max(imgH, 46) + 14);
+
+        doc.setFontSize(10.5);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor.apply(doc, C_DARK);
+        doc.text(code + '  (' + CATEGORIES[g.category].label + ', x' + g.count + ' en el chute)', margin, y);
+        y += 5;
+
+        var blockTop = y;
+        var textX = margin + imgW + 8;
+        var textW = contentW - imgW - 8;
+
+        if (img.dataUrl) {
+          doc.setDrawColor.apply(doc, C_LINE);
+          doc.setFillColor(255, 255, 255);
+          doc.roundedRect(margin, blockTop, imgW, imgH, 1, 1, 'FD');
+          doc.addImage(img.dataUrl, 'PNG', margin, blockTop, imgW, imgH);
+        }
+
+        var dims = plateDimsMm(g.sample.mesh);
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'normal');
+        doc.setTextColor(0, 0, 0);
+        var ty = blockTop + 4;
+
+        // opts.checkbox: dibuja casilla en vez de texto. opts.iconDataUrl: dibuja un icono
+        // pequeno pegado al margen derecho de la columna (grado o tipo de cabeza).
+        function specLine(lbl, val, opts) {
+          opts = opts || {};
+          doc.setFont(undefined, 'bold');
+          doc.text(lbl + ':', textX, ty);
+          doc.setFont(undefined, 'normal');
+          if (opts.checkbox !== undefined) {
+            drawPdfCheckbox(textX + labelW, ty, opts.checkbox);
+            ty += 6;
+            return;
+          }
+          var iconSpace = opts.iconDataUrl ? 9 : 0;
+          var wrapped = doc.splitTextToSize(String(val), textW - labelW - iconSpace);
+          doc.text(wrapped, textX + labelW, ty);
+          if (opts.iconDataUrl) doc.addImage(opts.iconDataUrl, 'PNG', textX + textW - 8, ty - 6, 7.5, 7.5);
+          ty += Math.max(wrapped.length * 4.6, opts.iconDataUrl ? 8 : 0, 5);
+        }
+
+        specLine('Dimension placa', dims[0] + ' x ' + dims[1] + ' x ' + dims[2] + ' mm');
+
+        if (cfg) {
+          schemaFields.forEach(function(field) {
+            var val = cfg[field.key];
+            if (field.type === 'checkbox') { specLine(field.label, null, { checkbox: !!val }); return; }
+            if (field.type === 'grado') {
+              var gradeIcon = iconToDataUrl(function(c) { drawBoltGradeIcon(c, cfg.sistema, val); });
+              specLine(field.label, (val || '-') + ' (' + (cfg.sistema === 'metrico' ? 'metrico' : 'imperial') + ')', { iconDataUrl: gradeIcon });
+              return;
+            }
+            if (field.key === 'tipoCabeza') {
+              var headIcon = iconToDataUrl(function(c) { drawBoltHeadTypeIcon(c, val); });
+              specLine(field.label, val || '-', { iconDataUrl: headIcon });
+              return;
+            }
+            specLine(field.label, (val != null && val !== '') ? val : '-');
+          });
+
+          var intervenidas = Object.keys(meshStates).filter(function(k) {
+            return getPlateCode(meshStates[k].label) === code && meshStates[k].state !== 0;
+          });
+          if (intervenidas.length > 0) {
+            var apuntaladas = intervenidas.filter(function(k) { return meshStates[k].apuntalado; });
+            var soldaduras = {};
+            apuntaladas.forEach(function(k) {
+              var s = meshStates[k].soldadura || 'Sin especificar';
+              soldaduras[s] = (soldaduras[s] || 0) + 1;
+            });
+            var soldTxt = Object.keys(soldaduras).map(function(s) { return s + ' (' + soldaduras[s] + ')'; }).join(', ') || 'Ninguna';
+            var todasApuntaladas = apuntaladas.length === intervenidas.length;
+            specLine('Apuntalamiento', (todasApuntaladas ? 'Si' : (apuntaladas.length === 0 ? 'No' : 'Parcial')) + ' -- Soldadura: ' + soldTxt);
+          }
+        } else {
+          doc.setTextColor(180, 90, 50);
+          doc.text('Sin especificacion de pernos registrada para este codigo (usar "Configurar pernos" en la app).', textX, ty, { maxWidth: textW });
+          doc.setTextColor(0, 0, 0);
+          ty += 5;
+        }
+
+        y = blockTop + Math.max(imgH, ty - blockTop) + 10;
+      });
+    }
+    pernosSection();
 
     drawFooter();
-    doc.save('informe_chute_cv201_' + Date.now() + '.pdf');
+    doc.save('informe_' + chuteId + '_' + Date.now() + '.pdf');
     statusEl.textContent = 'Informe generado.';
   }
 
