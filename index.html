@@ -687,23 +687,26 @@ function startApp() {
       ctx.fill(); ctx.stroke();
       markR = s * 0.42;
     } else if (t.indexOf('avellanad') !== -1) {
-      // Perfil lateral: cabeza embutida, plana arriba, angulada hacia el vastago -- la
-      // marca de grado va sobre esa parte plana superior.
+      // Vista superior: cabeza embutida y queda al ras de la placa, plana y circular vista
+      // desde arriba (el perfil angulado solo se ve de canto, no aporta en vista superior).
       ctx.beginPath();
-      ctx.moveTo(cx - r * 0.9, cy - r * 0.55);
-      ctx.lineTo(cx + r * 0.9, cy - r * 0.55);
-      ctx.lineTo(cx + r * 0.28, cy + r * 0.75);
-      ctx.lineTo(cx - r * 0.28, cy + r * 0.75);
+      ctx.arc(cx, cy, r * 0.85, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      markR = r * 0.55;
+    } else if (t.indexOf('candado') !== -1) {
+      // Vista superior: cabeza tipo "ranura" (capsula, dos lados rectos con extremos
+      // semicirculares) -- evita que gire al apretar, se encaja en un rebaje de la misma
+      // forma en la placa.
+      var capR = r * 0.45, half = r * 0.42;
+      ctx.beginPath();
+      ctx.moveTo(cx - half, cy - capR);
+      ctx.lineTo(cx + half, cy - capR);
+      ctx.arc(cx + half, cy, capR, -Math.PI / 2, Math.PI / 2, false);
+      ctx.lineTo(cx - half, cy + capR);
+      ctx.arc(cx - half, cy, capR, Math.PI / 2, Math.PI * 1.5, false);
       ctx.closePath();
       ctx.fill(); ctx.stroke();
-      markY = cy - r * 0.15; markR = r * 0.55;
-    } else if (t.indexOf('candado') !== -1) {
-      // Vista superior: cabeza ovalada/asimetrica tipo "plow bolt" (evita que gire al
-      // apretar, se encaja en un rebaje de la misma forma en la placa).
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, r * 0.95, r * 0.55, 0, 0, Math.PI * 2);
-      ctx.fill(); ctx.stroke();
-      markR = r * 0.42;
+      markR = capR * 0.8;
     } else if (t.indexOf('socket') !== -1 || t.indexOf('allen') !== -1) {
       ctx.beginPath();
       ctx.arc(cx, cy, r * 0.85, 0, Math.PI * 2);
@@ -782,21 +785,7 @@ function startApp() {
   var container = document.getElementById('canvas-container');
   var scene = new THREE.Scene();
 
-  // Fondo con degradado suave (en vez de color plano) para dar profundidad
-  // sin restar contraste a las piezas del modelo durante la inspeccion.
-  function makeBackgroundTexture() {
-    var canvas = document.createElement('canvas');
-    canvas.width = 2; canvas.height = 512;
-    var ctx = canvas.getContext('2d');
-    var grad = ctx.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0, '#eef2f6');
-    grad.addColorStop(0.55, '#dde3e9');
-    grad.addColorStop(1, '#b7c0c9');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 2, 512);
-    return new THREE.CanvasTexture(canvas);
-  }
-  scene.background = makeBackgroundTexture();
+  scene.background = new THREE.Color('#dde3e9');
 
   var camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 50000);
   camera.position.set(4000, 3000, 4000);
@@ -1995,7 +1984,9 @@ function startApp() {
       verts.push({ x: prev.x + dir.dx * lens[i], y: prev.y + dir.dy * lens[i] });
     }
     var first = verts[0], last = verts[verts.length - 1];
-    var closeLen = Math.hypot(first.x - last.x, first.y - last.y);
+    // Redondeado a 0.1mm al guardar (no solo al mostrar) -- Math.hypot sobre las
+    // coordenadas calculadas arrastra ruido de punto flotante (ej. 600.0000000000001).
+    var closeLen = Math.round(Math.hypot(first.x - last.x, first.y - last.y) * 10) / 10;
     var closeDeg = Math.round(injertoAngleOf(first.x - last.x, first.y - last.y));
     var segMm = lens.concat([closeLen]);
     var segDeg = injertoSegAngles.concat([closeDeg]);
@@ -2230,6 +2221,25 @@ function startApp() {
       var code = getPlateCode(e.label);
       if (!groups[code]) groups[code] = { count: 0, category: e.category, sample: e };
       groups[code].count++;
+    });
+    return groups;
+  }
+
+  // Igual que collectPlateCodes, pero con el conteo por estado de cada tipo de placa/lifter
+  // (no solo el total) -- para desglosar el resumen de cambios por subcategoria en vez de un
+  // solo numero agregado por categoria.
+  function collectPlateCodeStateCounts() {
+    var groups = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      if (CATEGORIES[e.category].mode !== 'estado') return;
+      var code = getPlateCode(e.label);
+      if (!groups[code]) {
+        groups[code] = { category: e.category, total: 0, states: {} };
+        CATEGORIES[e.category].states.forEach(function(s) { groups[code].states[s.name] = 0; });
+      }
+      groups[code].states[CATEGORIES[e.category].states[e.state].name]++;
+      groups[code].total++;
     });
     return groups;
   }
@@ -2696,26 +2706,6 @@ function startApp() {
       return renderer.domElement.toDataURL('image/png');
     });
 
-    // Un representante por codigo distinto que tuvo cambios, proyectado a coordenadas de
-    // pantalla (0..1) con la camara que se acaba de usar para la foto.
-    var groups = {};
-    Object.keys(meshStates).forEach(function(k) {
-      var e = meshStates[k];
-      if (CATEGORIES[e.category].mode !== 'estado' || e.state === 0) return;
-      var code = getPlateCode(e.label);
-      if (!groups[code]) groups[code] = { code: code, category: e.category, worldCenter: e.worldCenter, state: e.state };
-    });
-    var labels = Object.keys(groups).sort().map(function(code) {
-      var g = groups[code];
-      var proj = g.worldCenter.clone().project(camera);
-      return {
-        code: code, category: g.category,
-        stateName: CATEGORIES[g.category].states[g.state].name,
-        pdfColor: CATEGORIES[g.category].states[g.state].pdfColor,
-        u: proj.x * 0.5 + 0.5, v: -proj.y * 0.5 + 0.5, onScreen: proj.z < 1
-      };
-    });
-
     Object.keys(meshStates).forEach(function(k) {
       var e = meshStates[k];
       e.mesh.material.opacity = savedOpacity[k];
@@ -2728,7 +2718,7 @@ function startApp() {
     updateCameraFromSpherical();
     renderer.render(scene, camera);
 
-    return { dataUrl: result.dataUrl, aspect: aspect, labels: labels };
+    return { dataUrl: result.dataUrl, aspect: aspect };
   }
 
   // Igual que snapshotFullChuteWithLabels pero para injertos: aca lo que importa es
@@ -2765,7 +2755,11 @@ function startApp() {
     });
 
     var labels = patchOrder.map(function(entry) {
-      var proj = entry.mesh.position.clone().project(camera);
+      // El punto real del parche esta horneado en la geometria (via facePoint), no en
+      // mesh.position (que queda en el origen salvo que el parche se haya arrastrado) --
+      // hay que usar el centro real de su caja envolvente en mundo, no mesh.position.
+      var center = new THREE.Box3().setFromObject(entry.mesh).getCenter(new THREE.Vector3());
+      var proj = center.project(camera);
       return { num: entry.num, u: proj.x * 0.5 + 0.5, v: -proj.y * 0.5 + 0.5, onScreen: proj.z < 1 };
     });
 
@@ -3018,26 +3012,6 @@ function startApp() {
       });
     }
 
-    // ================= DETALLE =================
-    function detailList(catKey, catDef) {
-      var items = Object.keys(meshStates)
-        .map(function(k) { return meshStates[k]; })
-        .filter(function(e) { return e.category === catKey && e.state !== 0; });
-      if (items.length === 0) return;
-      ensureSpace(12);
-      sectionHeader('Detalle de cambios - ' + catDef.label);
-      items.forEach(function(e) {
-        ensureSpace(5);
-        var color = PDF_COLOR_MAP[catDef.states[e.state].pdfColor] || C_YELLOW;
-        doc.setFillColor.apply(doc, color);
-        doc.circle(margin + 1.2, y - 1.3, 1.2, 'F');
-        doc.setFontSize(9);
-        doc.text(e.label + '   ->   ' + catDef.states[e.state].name, margin + 6, y);
-        y += 5;
-      });
-      y += 4;
-    }
-
     // ================= RESUMEN VISUAL (una sola imagen con todos los cambios) =================
     // Una vista isometrica del chute completo (todas las categorias a color real de estado a
     // la vez), con etiquetas por cada tipo distinto de placa/lifter/estructura que tuvo algun
@@ -3060,39 +3034,6 @@ function startApp() {
       doc.setFillColor(255, 255, 255);
       doc.roundedRect(imgX, imgY, imgW, imgH, 1, 1, 'FD');
       doc.addImage(overview.dataUrl, 'PNG', imgX, imgY, imgW, imgH);
-
-      // Empuja cada etiqueta radialmente desde el centro de la imagen hacia su propio
-      // cuadrante, hasta cerca del borde -- el chute ocupa sobre todo la franja diagonal
-      // central, asi que esto las saca de encima del modelo (antes quedaban pegadas a la
-      // pieza, a veces tapando el propio modelo).
-      overview.labels.forEach(function(lbl) {
-        if (!lbl.onScreen) return;
-        var du = lbl.u - 0.5, dv = lbl.v - 0.5;
-        var dlen = Math.hypot(du, dv) || 1;
-        du /= dlen; dv /= dlen;
-        var targetU = Math.max(0.05, Math.min(0.95, 0.5 + du * 0.66));
-        var targetV = Math.max(0.05, Math.min(0.95, 0.5 + dv * 0.66));
-
-        var px = imgX + lbl.u * imgW, py = imgY + lbl.v * imgH;
-        var lx = imgX + targetU * imgW, ly = imgY + targetV * imgH;
-
-        var color = PDF_COLOR_MAP[lbl.pdfColor] || C_STEEL;
-        doc.setDrawColor.apply(doc, C_DARK);
-        doc.setLineWidth(0.3);
-        doc.line(px, py, lx, ly);
-        doc.setFillColor.apply(doc, color);
-        doc.circle(px, py, 1, 'F');
-
-        doc.setFontSize(7);
-        doc.setFont(undefined, 'bold');
-        var textW2 = doc.getTextWidth(lbl.code) + 3;
-        var boxX = du < 0 ? lx - textW2 : lx;
-        doc.setFillColor(255, 255, 255);
-        doc.roundedRect(boxX, ly - 2.6, textW2, 5, 0.6, 0.6, 'F');
-        doc.setTextColor.apply(doc, C_DARK);
-        doc.text(lbl.code, boxX + 1.5, ly + 0.8);
-      });
-      doc.setTextColor(0, 0, 0);
       y = imgY + imgH + 8;
 
       // Leyenda combinada de todas las categorias en modo estado, deduplicada -- placas y
@@ -3125,32 +3066,46 @@ function startApp() {
       doc.setTextColor(0, 0, 0);
       y += 9;
 
-      // Cuadro de conteos por categoria.
-      ensureSpace(5 * ESTADO_CATEGORIES.length + 8);
+      // Cuadro de conteos, desglosado por cada tipo de placa/lifter distinto (no solo el
+      // agregado de la categoria) -- para saber exactamente cuales codigos tuvieron cambios.
+      ensureSpace(10);
       doc.setFontSize(9);
       doc.setFont(undefined, 'bold');
       doc.setTextColor.apply(doc, C_DARK);
       doc.text('Cambios', margin, y);
-      y += 5;
-      doc.setFontSize(8.5);
-      doc.setFont(undefined, 'normal');
+      y += 6;
+      var codeCounts = collectPlateCodeStateCounts();
+      var codesByCategory = {};
+      Object.keys(codeCounts).forEach(function(code) {
+        var cat = codeCounts[code].category;
+        (codesByCategory[cat] = codesByCategory[cat] || []).push(code);
+      });
       ESTADO_CATEGORIES.forEach(function(catKey) {
-        var counts = countsByCategory[catKey];
+        var codes = (codesByCategory[catKey] || []).sort();
+        if (codes.length === 0) return;
         var total = Object.keys(meshStates).filter(function(k) { return meshStates[k].category === catKey; }).length;
-        var line = CATEGORIES[catKey].label + ':  ' +
-          CATEGORIES[catKey].states.map(function(s) { return s.name + ' ' + (counts[s.name] || 0); }).join('   ·   ') +
-          '   (de ' + total + ')';
-        doc.setTextColor(60, 60, 60);
-        doc.text(line, margin, y);
-        y += 5;
+        ensureSpace(4.6 * (codes.length + 1) + 3);
+        doc.setFontSize(8.5);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor.apply(doc, C_DARK);
+        doc.text(CATEGORIES[catKey].label + ' (' + total + ' en total)', margin, y);
+        y += 4.6;
+        doc.setFont(undefined, 'normal');
+        codes.forEach(function(code) {
+          var info = codeCounts[code];
+          var line = code + ':  ' +
+            CATEGORIES[catKey].states.map(function(s) { return s.name + ' ' + (info.states[s.name] || 0); }).join('   ·   ') +
+            '   (de ' + info.total + ')';
+          ensureSpace(4.6);
+          doc.setTextColor(60, 60, 60);
+          doc.text(line, margin + 3, y);
+          y += 4.6;
+        });
+        y += 2.5;
       });
       doc.setTextColor(0, 0, 0);
     }
     changesOverviewSection();
-
-    newPage();
-    sectionHeader('Detalle completo de cambios');
-    ESTADO_CATEGORIES.forEach(function(catKey) { detailList(catKey, CATEGORIES[catKey]); });
 
     // ================= ESPECIFICACIONES DE PERNOS POR TIPO DE PLACA =================
     // Izquierda: vista isometrica del tipo de placa. Derecha: dimension (del modelo 3D) +
@@ -3168,11 +3123,15 @@ function startApp() {
       doc.setFontSize(8.5);
       doc.setFont(undefined, 'italic');
       doc.setTextColor(120, 120, 120);
-      doc.text(
+      // Alto reservado segun la cantidad real de lineas que resulten del wrap -- este texto
+      // es largo y casi siempre ocupa 2 lineas; con un alto fijo el primer bloque (cuyo
+      // marco arranca justo debajo) terminaba superpuesto con la segunda linea.
+      var disclaimerLines = doc.splitTextToSize(
         'Referencia de marcas de cabeza (esquema, no fotografia). SAE: 0 lineas = Grado 2, 3 lineas = Grado 5, 6 lineas = Grado 8. Metrico: numero de clase estampado (ej. 8.8, 10.9, 12.9).',
-        margin, y, { maxWidth: contentW }
+        contentW
       );
-      y += 10;
+      doc.text(disclaimerLines, margin, y);
+      y += disclaimerLines.length * 3.9 + 8;
       doc.setFont(undefined, 'normal');
       doc.setTextColor(0, 0, 0);
 
@@ -3391,7 +3350,7 @@ function startApp() {
         var imgW = contentW * 0.42;
         var imgH = imgW / (img.aspect || 1.3);
 
-        var segLine = (data.segmentDims || []).map(function(s) { return s.seg + ': ' + s.mm + 'mm'; }).join('   ');
+        var segLine = (data.segmentDims || []).map(function(s) { return s.seg + ': ' + (Math.round(s.mm * 10) / 10) + 'mm'; }).join('   ');
         var allLabels = ['Ubicacion', 'Vertices', 'Segmentos', 'Espesor', 'Proceso de soldadura', 'Electrodo', 'Fecha'];
         doc.setFontSize(9);
         doc.setFont(undefined, 'bold');
@@ -3510,7 +3469,9 @@ function startApp() {
         doc.line(dimA[0], dimA[1], dimB[0], dimB[1]);
 
         var segData = segmentDims && segmentDims[j];
-        var txt = (segData ? segData.mm : '?') + ' mm';
+        // Redondeado a 0.1mm -- el largo del segmento de cierre sale de un calculo
+        // geometrico (hipotenusa) que arrastra ruido de punto flotante (ej. 600.0000000000001).
+        var txt = (segData ? (Math.round(segData.mm * 10) / 10) : '?') + ' mm';
         var midDim = [(dimA[0] + dimB[0]) / 2, (dimA[1] + dimB[1]) / 2];
         var tw = doc.getTextWidth(txt) + 1.6;
         doc.setFillColor(255, 255, 255);
