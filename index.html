@@ -2122,6 +2122,17 @@ function startApp() {
     var savedPatchVisible = patchIds.map(function(id) { return patches[id].mesh.visible; });
     patchIds.forEach(function(id) { patches[id].mesh.visible = false; });
 
+    // Color neutro fijo (no el color de estado actual, que varia pieza a pieza y confunde
+    // en una miniatura de referencia) y semitransparente, para que se aprecien las aristas
+    // del lado de atras de la pieza (el contorno oscuro ya existe como hijo LineSegments y
+    // se sigue dibujando encima, independiente de la transparencia del solido).
+    var savedColor = mesh.material.color.getHex();
+    var savedMatOpacity = mesh.material.opacity;
+    var savedMatTransparent = mesh.material.transparent;
+    mesh.material.color.setHex(0xD9D7CF);
+    mesh.material.transparent = true;
+    mesh.material.opacity = 0.68;
+
     var savedTarget = target.clone();
     var savedTheta = spherical.theta, savedPhi = spherical.phi, savedRadius = spherical.radius;
     target.copy(center);
@@ -2138,6 +2149,9 @@ function startApp() {
     Object.keys(meshStates).forEach(function(k) { meshStates[k].mesh.visible = savedVisible[k]; });
     flowGroups.forEach(function(p, i) { p.front.visible = savedFlowVisible[i]; p.ghost.visible = savedFlowVisible[i]; });
     patchIds.forEach(function(id, i) { patches[id].mesh.visible = savedPatchVisible[i]; });
+    mesh.material.color.setHex(savedColor);
+    mesh.material.opacity = savedMatOpacity;
+    mesh.material.transparent = savedMatTransparent;
     target.copy(savedTarget);
     spherical.theta = savedTheta; spherical.phi = savedPhi; spherical.radius = savedRadius;
     updateCameraFromSpherical();
@@ -2199,14 +2213,20 @@ function startApp() {
     var center = modelBox.getCenter(new THREE.Vector3());
     var size = modelBox.getSize(new THREE.Vector3()).length() || 1;
 
+    // Este resumen es solo para cambios de placas/lifters -- la estructura queda atenuada
+    // (transparente) en vez de a color pleno, para no competir visualmente con lo que
+    // realmente importa aca.
     var savedOpacity = {}, savedTransparent = {};
     Object.keys(meshStates).forEach(function(k) {
       var e = meshStates[k];
       savedOpacity[k] = e.mesh.material.opacity;
       savedTransparent[k] = e.mesh.material.transparent;
-      e.mesh.material.transparent = false;
-      e.mesh.material.opacity = 1;
+      e.mesh.material.transparent = true;
+      e.mesh.material.opacity = (e.category === 'estructura') ? 0.14 : 1;
     });
+    var flowGroups = flowMarkers.concat(entryMarkers);
+    var savedFlowVisible = flowGroups.map(function(p) { return p.front.visible; });
+    flowGroups.forEach(function(p) { p.front.visible = false; p.ghost.visible = false; });
     var patchIds = Object.keys(patches);
     var savedPatchVisible = patchIds.map(function(id) { return patches[id].mesh.visible; });
     patchIds.forEach(function(id) { patches[id].mesh.visible = false; });
@@ -2250,7 +2270,62 @@ function startApp() {
       e.mesh.material.opacity = savedOpacity[k];
       e.mesh.material.transparent = savedTransparent[k];
     });
+    flowGroups.forEach(function(p, i) { p.front.visible = savedFlowVisible[i]; p.ghost.visible = savedFlowVisible[i]; });
     patchIds.forEach(function(id, i) { patches[id].mesh.visible = savedPatchVisible[i]; });
+    target.copy(savedTarget);
+    spherical.theta = savedTheta; spherical.phi = savedPhi; spherical.radius = savedRadius;
+    updateCameraFromSpherical();
+    renderer.render(scene, camera);
+
+    return { dataUrl: result.dataUrl, aspect: aspect, labels: labels };
+  }
+
+  // Igual que snapshotFullChuteWithLabels pero para injertos: aca lo que importa es la
+  // estructura, asi que placas/lifters quedan atenuadas y la estructura + los parches se
+  // ven a color pleno. Cada etiqueta es el numero de injerto (mismo orden/numeracion que
+  // la seccion de detalle de injertos del informe).
+  function snapshotFullChuteWithInjertoLabels(patchOrder) {
+    if (!modelBox) return null;
+    var center = modelBox.getCenter(new THREE.Vector3());
+    var size = modelBox.getSize(new THREE.Vector3()).length() || 1;
+
+    var savedOpacity = {}, savedTransparent = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      savedOpacity[k] = e.mesh.material.opacity;
+      savedTransparent[k] = e.mesh.material.transparent;
+      e.mesh.material.transparent = true;
+      e.mesh.material.opacity = (e.category === 'estructura') ? 1 : 0.15;
+    });
+    var flowGroups = flowMarkers.concat(entryMarkers);
+    var savedFlowVisible = flowGroups.map(function(p) { return p.front.visible; });
+    flowGroups.forEach(function(p) { p.front.visible = false; p.ghost.visible = false; });
+
+    var savedTarget = target.clone();
+    var savedTheta = spherical.theta, savedPhi = spherical.phi, savedRadius = spherical.radius;
+    target.copy(center);
+    spherical.theta = defaultSpherical.theta;
+    spherical.phi = defaultSpherical.phi;
+    spherical.radius = size * 1.15;
+    updateCameraFromSpherical();
+
+    var aspect = 1.7;
+    var result = captureAtAspect(aspect, function() {
+      renderer.render(scene, camera);
+      return renderer.domElement.toDataURL('image/png');
+    });
+
+    var labels = patchOrder.map(function(entry) {
+      var proj = entry.mesh.position.clone().project(camera);
+      return { num: entry.num, u: proj.x * 0.5 + 0.5, v: -proj.y * 0.5 + 0.5, onScreen: proj.z < 1 };
+    });
+
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      e.mesh.material.opacity = savedOpacity[k];
+      e.mesh.material.transparent = savedTransparent[k];
+    });
+    flowGroups.forEach(function(p, i) { p.front.visible = savedFlowVisible[i]; p.ghost.visible = savedFlowVisible[i]; });
     target.copy(savedTarget);
     spherical.theta = savedTheta; spherical.phi = savedPhi; spherical.radius = savedRadius;
     updateCameraFromSpherical();
@@ -2346,21 +2421,26 @@ function startApp() {
     var margin = 14;
     var contentW = pageW - margin * 2;
     var y = 0;
-    var pageNum = 1;
 
     function newPage() {
       doc.addPage();
-      pageNum++;
-      drawFooter();
       y = 24;
     }
 
-    function drawFooter() {
-      doc.setFontSize(7.5);
-      doc.setTextColor(150, 150, 150);
-      doc.text('Informe generado por plataforma de inspeccion Dimarza - BHP Escondida', margin, pageH - 8);
-      doc.text('Pagina ' + pageNum, pageW - margin, pageH - 8, { align: 'right' });
-      doc.setTextColor(0, 0, 0);
+    // El pie de pagina se dibuja UNA sola vez por pagina, al final, recorriendo todas las
+    // paginas ya generadas (ver drawAllFooters mas abajo) -- antes se dibujaba al crear
+    // cada pagina nueva, lo que dejaba la pagina 1 sin pie (nunca pasa por newPage()) y
+    // duplicaba el de la ultima pagina (se llamaba otra vez al terminar el reporte).
+    function drawAllFooters() {
+      var totalPages = doc.internal.getNumberOfPages();
+      for (var p = 1; p <= totalPages; p++) {
+        doc.setPage(p);
+        doc.setFontSize(7.5);
+        doc.setTextColor(150, 150, 150);
+        doc.text('Informe generado por plataforma de inspeccion Dimarza - BHP Escondida', margin, pageH - 8);
+        doc.text('Pagina ' + p + ' de ' + totalPages, pageW - margin, pageH - 8, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
+      }
     }
 
     function ensureSpace(h) {
@@ -2536,14 +2616,20 @@ function startApp() {
       doc.roundedRect(imgX, imgY, imgW, imgH, 1, 1, 'FD');
       doc.addImage(overview.dataUrl, 'PNG', imgX, imgY, imgW, imgH);
 
-      var offsets = [[16, -10], [16, 10], [-16, -10], [-16, 10], [22, 0], [-22, 0], [0, -14], [0, 14]];
-      overview.labels.forEach(function(lbl, i) {
+      // Empuja cada etiqueta radialmente desde el centro de la imagen hacia su propio
+      // cuadrante, hasta cerca del borde -- el chute ocupa sobre todo la franja diagonal
+      // central, asi que esto las saca de encima del modelo (antes quedaban pegadas a la
+      // pieza, a veces tapando el propio modelo).
+      overview.labels.forEach(function(lbl) {
         if (!lbl.onScreen) return;
+        var du = lbl.u - 0.5, dv = lbl.v - 0.5;
+        var dlen = Math.hypot(du, dv) || 1;
+        du /= dlen; dv /= dlen;
+        var targetU = Math.max(0.05, Math.min(0.95, 0.5 + du * 0.66));
+        var targetV = Math.max(0.05, Math.min(0.95, 0.5 + dv * 0.66));
+
         var px = imgX + lbl.u * imgW, py = imgY + lbl.v * imgH;
-        if (px < imgX || px > imgX + imgW || py < imgY || py > imgY + imgH) return;
-        var off = offsets[i % offsets.length];
-        var lx = Math.max(imgX + 4, Math.min(imgX + imgW - 4, px + off[0]));
-        var ly = Math.max(imgY + 4, Math.min(imgY + imgH - 4, py + off[1]));
+        var lx = imgX + targetU * imgW, ly = imgY + targetV * imgH;
 
         var color = PDF_COLOR_MAP[lbl.pdfColor] || C_STEEL;
         doc.setDrawColor.apply(doc, C_DARK);
@@ -2555,7 +2641,7 @@ function startApp() {
         doc.setFontSize(7);
         doc.setFont(undefined, 'bold');
         var textW2 = doc.getTextWidth(lbl.code) + 3;
-        var boxX = off[0] < 0 ? lx - textW2 : lx;
+        var boxX = du < 0 ? lx - textW2 : lx;
         doc.setFillColor(255, 255, 255);
         doc.roundedRect(boxX, ly - 2.6, textW2, 5, 0.6, 0.6, 'F');
         doc.setTextColor.apply(doc, C_DARK);
@@ -2564,7 +2650,9 @@ function startApp() {
       doc.setTextColor(0, 0, 0);
       y = imgY + imgH + 8;
 
-      // Leyenda combinada de todas las categorias en modo estado.
+      // Leyenda combinada de todas las categorias en modo estado, deduplicada -- placas y
+      // lifters suelen compartir exactamente los mismos nombres/colores de estado, y antes
+      // aparecian repetidos.
       ensureSpace(12);
       doc.setFontSize(9);
       doc.setFont(undefined, 'bold');
@@ -2572,8 +2660,12 @@ function startApp() {
       doc.text('Leyenda', margin, y);
       y += 5;
       var legendX = margin;
+      var seenLegend = {};
       ESTADO_CATEGORIES.forEach(function(catKey) {
         CATEGORIES[catKey].states.forEach(function(s) {
+          var dedupeKey = s.name + '|' + s.pdfColor;
+          if (seenLegend[dedupeKey]) return;
+          seenLegend[dedupeKey] = true;
           var color = PDF_COLOR_MAP[s.pdfColor] || C_STEEL;
           if (legendX + 40 > margin + contentW) { legendX = margin; y += 6; }
           doc.setFillColor.apply(doc, color);
@@ -2657,12 +2749,21 @@ function startApp() {
         doc.setDrawColor(0, 0, 0);
       }
 
-      codes.forEach(function(code) {
+      var itemsOnPage = 0;
+      codes.forEach(function(code, codeIdx) {
         var g = groups[code];
         var cfg = pernosConfig[code];
         var img = snapshotPieceThumbnail(g.sample.mesh);
+        // Caja de imagen de alto fijo (en vez de alto = ancho/aspect sin tope): con
+        // piezas muy angostas el alto libre podia dispararse y dejar solo 1-2 bloques
+        // por hoja pese al tope de 3 mas abajo. La imagen real se ajusta (contain) y
+        // se centra dentro de esta caja, preservando su proporcion.
         var imgW = contentW * 0.42;
-        var imgH = imgW / (img.aspect || 1.3);
+        var imgH = 38;
+        var aspect = img.aspect || 1.3;
+        var imgDrawW = imgW, imgDrawH = imgW / aspect;
+        if (imgDrawH > imgH) { imgDrawH = imgH; imgDrawW = imgH * aspect; }
+        var imgOffX = (imgW - imgDrawW) / 2, imgOffY = (imgH - imgDrawH) / 2;
 
         var schemaFields = cfg ? PERNOS_SCHEMA.filter(function(f) {
           return !(f.hideFor && f.hideFor.indexOf(g.category) !== -1) && !(f.type === 'select' && f.key === 'sistema');
@@ -2676,8 +2777,10 @@ function startApp() {
         var allLabels = ['Dimension placa'].concat(schemaFields.map(function(f) { return f.label; }));
         var labelW = Math.max.apply(null, allLabels.map(function(l) { return doc.getTextWidth(l + ':'); })) + 4;
 
-        ensureSpace(Math.max(imgH, 46) + 18);
-        var borderTop = y - 3;
+        var yBeforeItem = y;
+        ensureSpace(Math.max(imgH, 46) + 22);
+        if (y !== yBeforeItem) itemsOnPage = 0;
+        var borderTop = y - 7;
 
         doc.setFontSize(10.5);
         doc.setFont(undefined, 'bold');
@@ -2693,7 +2796,7 @@ function startApp() {
           doc.setDrawColor.apply(doc, C_LINE);
           doc.setFillColor(255, 255, 255);
           doc.roundedRect(margin, blockTop, imgW, imgH, 1, 1, 'FD');
-          doc.addImage(img.dataUrl, 'PNG', margin, blockTop, imgW, imgH);
+          doc.addImage(img.dataUrl, 'PNG', margin + imgOffX, blockTop + imgOffY, imgDrawW, imgDrawH);
         }
 
         var dims = pieceDimsMm(g.sample.mesh);
@@ -2747,11 +2850,79 @@ function startApp() {
         doc.roundedRect(margin - 4, borderTop, contentW + 8, (blockBottom + 4) - borderTop, 2, 2, 'D');
         doc.setDrawColor(0, 0, 0);
         y = blockBottom + 14;
+        itemsOnPage++;
+
+        // Maximo 3 elementos por hoja (contando solo los que realmente entraron en esta
+        // pagina -- si un salto natural por falta de espacio ya movio el conteo a otra
+        // hoja, no forzamos un segundo salto encima).
+        var isLast = codeIdx === codes.length - 1;
+        if (!isLast && itemsOnPage === 3) { newPage(); itemsOnPage = 0; }
       });
     }
     pernosSection();
 
-    // ================= INJERTOS =================
+    // ================= RESUMEN VISUAL DE INJERTOS =================
+    function injertosOverviewSection() {
+      var patchIds = Object.keys(patches);
+      if (patchIds.length === 0) return;
+
+      var patchOrder = patchIds.map(function(id, i) { return { num: i + 1, mesh: patches[id].mesh }; });
+      var overview = snapshotFullChuteWithInjertoLabels(patchOrder);
+      if (!overview || !overview.dataUrl) return;
+
+      newPage();
+      sectionHeader('Resumen visual de injertos');
+
+      var imgW = contentW;
+      var imgH = imgW / overview.aspect;
+      var maxImgH = pageH - 16 - y - 14;
+      if (imgH > maxImgH) { imgH = maxImgH; imgW = imgH * overview.aspect; }
+      var imgX = margin + (contentW - imgW) / 2;
+      var imgY = y;
+
+      doc.setDrawColor.apply(doc, C_LINE);
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(imgX, imgY, imgW, imgH, 1, 1, 'FD');
+      doc.addImage(overview.dataUrl, 'PNG', imgX, imgY, imgW, imgH);
+
+      overview.labels.forEach(function(lbl) {
+        if (!lbl.onScreen) return;
+        var du = lbl.u - 0.5, dv = lbl.v - 0.5;
+        var dlen = Math.hypot(du, dv) || 1;
+        du /= dlen; dv /= dlen;
+        var targetU = Math.max(0.05, Math.min(0.95, 0.5 + du * 0.66));
+        var targetV = Math.max(0.05, Math.min(0.95, 0.5 + dv * 0.66));
+        var px = imgX + lbl.u * imgW, py = imgY + lbl.v * imgH;
+        var lx = imgX + targetU * imgW, ly = imgY + targetV * imgH;
+
+        doc.setDrawColor.apply(doc, C_DARK);
+        doc.setLineWidth(0.3);
+        doc.line(px, py, lx, ly);
+        doc.setFillColor.apply(doc, C_RED);
+        doc.circle(px, py, 1.1, 'F');
+
+        doc.setFontSize(7.5);
+        doc.setFont(undefined, 'bold');
+        var txt = String(lbl.num);
+        var tw = doc.getTextWidth(txt) + 3.4;
+        var boxX = du < 0 ? lx - tw : lx;
+        doc.setFillColor.apply(doc, C_RED);
+        doc.roundedRect(boxX, ly - 2.8, tw, 5.4, 0.8, 0.8, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.text(txt, boxX + (tw - doc.getTextWidth(txt)) / 2, ly + 0.9);
+      });
+      doc.setTextColor(0, 0, 0);
+      y = imgY + imgH + 8;
+
+      doc.setFontSize(8.5);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(90, 90, 90);
+      doc.text(patchIds.length + ' injerto(s) identificado(s). Detalle y geometria acotada en las paginas siguientes.', margin, y);
+      doc.setTextColor(0, 0, 0);
+    }
+    injertosOverviewSection();
+
+    // ================= INJERTOS (detalle) =================
     function injertosSection() {
       var patchIds = Object.keys(patches);
       if (patchIds.length === 0) return;
@@ -2778,8 +2949,8 @@ function startApp() {
         doc.setFont(undefined, 'bold');
         var labelW = Math.max.apply(null, allLabels.map(function(l) { return doc.getTextWidth(l + ':'); })) + 4;
 
-        ensureSpace(Math.max(imgH, 50) + 18);
-        var borderTop = y - 3;
+        ensureSpace(Math.max(imgH, 50) + 22);
+        var borderTop = y - 7;
 
         doc.setFontSize(10.5);
         doc.setFont(undefined, 'bold');
@@ -2828,7 +2999,125 @@ function startApp() {
     }
     injertosSection();
 
-    drawFooter();
+    // ================= GEOMETRIA ACOTADA DE INJERTOS =================
+    // Dibujo tecnico (tipo "cotas" de un plano) de la geometria real de cada injerto:
+    // contorno del poligono, vertices con su letra, y una linea de cota desplazada hacia
+    // afuera de cada segmento (con lineas de extension) mostrando la medida real en mm --
+    // usa los mismos points2D/segmentDims ya guardados al crear el parche, no es una
+    // aproximacion nueva.
+    function drawDimensionedInjerto(boxX, boxY, boxSize, points2D, vertexLabels, segmentDims) {
+      var n = points2D.length;
+      var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      points2D.forEach(function(p) {
+        minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]);
+        minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]);
+      });
+      var w = (maxX - minX) || 1, h = (maxY - minY) || 1;
+      var pad = boxSize * 0.24;
+      var drawSize = boxSize - pad * 2;
+      var scale = Math.min(drawSize / w, drawSize / h);
+      var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+      var cboxX = boxX + boxSize / 2, cboxY = boxY + boxSize / 2;
+
+      function toPdf(p) {
+        // points2D tiene el eje Y "hacia arriba" (se invirtio al crearlo desde el canvas
+        // de dibujo); en el PDF Y crece hacia abajo, por eso se invierte de nuevo aca.
+        return [cboxX + (p[0] - cx) * scale, cboxY - (p[1] - cy) * scale];
+      }
+      var pdfPts = points2D.map(toPdf);
+
+      doc.setDrawColor.apply(doc, C_DARK);
+      doc.setLineWidth(0.4);
+      for (var i = 0; i < n; i++) {
+        var a = pdfPts[i], b = pdfPts[(i + 1) % n];
+        doc.line(a[0], a[1], b[0], b[1]);
+      }
+
+      doc.setFillColor.apply(doc, C_DARK);
+      pdfPts.forEach(function(p, i) {
+        doc.circle(p[0], p[1], 0.9, 'F');
+        doc.setFontSize(7);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor.apply(doc, C_DARK);
+        doc.text(vertexLabels[i] || '', p[0] + 2, p[1] - 1.5);
+      });
+
+      doc.setFontSize(6.3);
+      doc.setFont(undefined, 'normal');
+      for (var j = 0; j < n; j++) {
+        var pa = pdfPts[j], pb = pdfPts[(j + 1) % n];
+        var mx = (pa[0] + pb[0]) / 2, my = (pa[1] + pb[1]) / 2;
+        var dx = pb[0] - pa[0], dy = pb[1] - pa[1];
+        var segLen = Math.hypot(dx, dy) || 1;
+        var nx = -dy / segLen, ny = dx / segLen;
+        if (nx * (cboxX - mx) + ny * (cboxY - my) > 0) { nx = -nx; ny = -ny; } // apuntar hacia afuera
+        var off = 6;
+        var dimA = [pa[0] + nx * off, pa[1] + ny * off];
+        var dimB = [pb[0] + nx * off, pb[1] + ny * off];
+
+        doc.setDrawColor(150, 90, 50);
+        doc.setLineWidth(0.2);
+        doc.line(pa[0], pa[1], dimA[0], dimA[1]);
+        doc.line(pb[0], pb[1], dimB[0], dimB[1]);
+        doc.line(dimA[0], dimA[1], dimB[0], dimB[1]);
+
+        var segData = segmentDims && segmentDims[j];
+        var txt = (segData ? segData.mm : '?') + ' mm';
+        var midDim = [(dimA[0] + dimB[0]) / 2, (dimA[1] + dimB[1]) / 2];
+        var tw = doc.getTextWidth(txt) + 1.6;
+        doc.setFillColor(255, 255, 255);
+        doc.rect(midDim[0] - tw / 2, midDim[1] - 2, tw, 3.4, 'F');
+        doc.setTextColor(150, 90, 50);
+        doc.text(txt, midDim[0] - tw / 2 + 0.8, midDim[1] + 0.7);
+      }
+      doc.setDrawColor(0, 0, 0);
+      doc.setTextColor(0, 0, 0);
+    }
+
+    function injertosDimensionedSection() {
+      var patchIds = Object.keys(patches);
+      if (patchIds.length === 0) return;
+
+      newPage();
+      sectionHeader('Geometria acotada de injertos');
+      doc.setFontSize(8.5);
+      doc.setFont(undefined, 'italic');
+      doc.setTextColor(120, 120, 120);
+      doc.text('Cotas en mm, tomadas de las dimensiones ingresadas al crear cada parche.', margin, y);
+      y += 8;
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(0, 0, 0);
+
+      var boxSize = (contentW - 10) / 2;
+      var col = 0;
+      var rowTop = y;
+      patchIds.forEach(function(id, i) {
+        var data = patches[id].data;
+        if (col === 0) {
+          ensureSpace(boxSize + 16);
+          rowTop = y;
+        }
+        var boxX = margin + col * (boxSize + 10);
+
+        doc.setDrawColor.apply(doc, C_LINE);
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(boxX, rowTop, boxSize, boxSize, 1, 1, 'FD');
+        drawDimensionedInjerto(boxX, rowTop, boxSize, data.points2D, data.vertexLabels, data.segmentDims);
+
+        doc.setFontSize(9);
+        doc.setFont(undefined, 'bold');
+        doc.setTextColor.apply(doc, C_DARK);
+        doc.text('Injerto ' + (i + 1) + '  ·  Espesor ' + (data.espesor || '-'), boxX, rowTop + boxSize + 5);
+        doc.setTextColor(0, 0, 0);
+
+        col++;
+        if (col === 2) { col = 0; y = rowTop + boxSize + 10; }
+      });
+      if (col !== 0) y = rowTop + boxSize + 10;
+    }
+    injertosDimensionedSection();
+
+    drawAllFooters();
     doc.save('informe_' + chuteId + '_' + Date.now() + '.pdf');
     statusEl.textContent = 'Informe generado.';
   }
