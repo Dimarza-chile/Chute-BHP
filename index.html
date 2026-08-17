@@ -54,12 +54,27 @@
   #counts { margin-top:10px; padding-top:10px; border-top:1px solid #ddd; font-size:12px; color:#555; }
   #counts div { display:flex; justify-content:space-between; margin:2px 0; }
   #selected-info {
-    position:fixed; top:12px; right:12px; z-index:10;
+    position:fixed; top:172px; right:12px; z-index:10;
     background:rgba(255,255,255,0.94); border-radius:10px; padding:12px 16px;
     box-shadow:0 2px 8px rgba(0,0,0,0.12); font-size:13px; color:#2C2C2A;
     min-width:200px; display:none; opacity:0; transition:opacity 0.4s ease;
   }
   #selected-info strong { display:block; margin-bottom:6px; font-size:14px; }
+
+  /* --- Navcube: brujula 3D estilo Inventor para saltar a vistas estandar --- */
+  #navcube-panel {
+    position:fixed; top:12px; right:12px; z-index:11;
+    background:rgba(255,255,255,0.94); border-radius:10px; padding:8px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.12);
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+  }
+  #navcube-canvas { display:block; cursor:pointer; }
+  #navcube-toolbar { display:flex; gap:4px; width:100%; }
+  #navcube-toolbar button {
+    flex:1; padding:5px 2px; font-size:10px; border-radius:5px; border:1px solid #ccc;
+    background:#fff; cursor:pointer; color:#444;
+  }
+  #navcube-toolbar button.active { background:#2C2C2A; color:#fff; border-color:#2C2C2A; }
   #loading {
     position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
     font-size:14px; color:#888; z-index:20;
@@ -127,11 +142,21 @@
   .chute-card-btn:hover { background:#454542; }
 
   /* --- Editor de injertos (parches soldados sobre estructura) --- */
-  #injerto-draw-canvas { border:1px solid #ddd; border-radius:8px; background:#f7f6f2; touch-action:none; display:block; margin:0 auto; }
+  #injerto-draw-canvas { border:1px solid #ddd; border-radius:8px; background:#f7f6f2; touch-action:none; display:block; margin:0 auto; cursor:crosshair; }
   #injerto-draw-hint { font-size:11.5px; color:#888; text-align:center; margin-top:8px; }
+  #injerto-dims-canvas { border:1px solid #ddd; border-radius:8px; background:#f7f6f2; display:block; margin:0 auto 12px; }
+  .injerto-seg-header { display:flex; align-items:center; gap:8px; font-size:9.5px; color:#999; text-transform:uppercase; letter-spacing:.04em; margin-bottom:3px; }
+  .injerto-seg-header span:first-child { min-width:52px; }
+  .injerto-seg-header span:not(:first-child) { flex:1; text-align:center; }
   .injerto-seg-row { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#444; margin:5px 0; }
   .injerto-seg-row span { min-width:52px; font-weight:600; color:#2C2C2A; }
-  .injerto-seg-row input { flex:1; padding:5px 6px; font-size:12px; border-radius:6px; border:1px solid #ccc; box-sizing:border-box; }
+  .injerto-seg-row input, .injerto-seg-row select { flex:1; padding:5px 6px; font-size:12px; border-radius:6px; border:1px solid #ccc; box-sizing:border-box; }
+  .injerto-seg-computed {
+    flex:1; padding:5px 6px; font-size:12px; border-radius:6px; border:1px dashed #ccc;
+    background:#f5f5f3; color:#888; box-sizing:border-box; text-align:center; font-weight:normal !important;
+    min-width:0 !important;
+  }
+  .injerto-seg-row-closing span:first-child { color:#999; }
   .injerto-field { margin-top:10px; }
   .injerto-field label { display:block; font-size:10.5px; color:#777; margin-bottom:3px; }
   .injerto-field select, .injerto-field input {
@@ -190,6 +215,15 @@
   <div id="sel-state">-</div>
 </div>
 
+<div id="navcube-panel">
+  <canvas id="navcube-canvas" width="96" height="96" title="Clic en una cara o esquina para saltar a esa vista"></canvas>
+  <div id="navcube-toolbar">
+    <button id="nc-home" title="Vista inicial">Inicio</button>
+    <button id="nc-fit" title="Ajustar el modelo a la vista">Ajustar</button>
+    <button id="nc-pan" title="Activar herramienta de desplazar (pan) con clic izquierdo">Pan</button>
+  </div>
+</div>
+
 <div class="modal-overlay" id="pernos-modal-overlay">
   <div class="modal-panel">
     <div class="modal-header">
@@ -208,7 +242,7 @@
 </div>
 
 <div class="modal-overlay" id="injerto-modal-overlay">
-  <div class="modal-panel" style="max-width:520px;">
+  <div class="modal-panel" style="max-width:560px;">
     <div class="modal-header">
       <div>
         <h3>Nuevo injerto</h3>
@@ -219,13 +253,14 @@
     <div class="modal-body">
       <div id="injerto-step-draw">
         <canvas id="injerto-draw-canvas" width="440" height="320"></canvas>
-        <div id="injerto-draw-hint">Haz clic para agregar cada vertice del parche (minimo 3).</div>
+        <div id="injerto-draw-hint">Haz clic para agregar cada vertice del parche (minimo 3). Cada linea se ajusta al angulo valido mas cercano (multiplos de 15&deg;).</div>
         <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
           <button id="btn-injerto-undo">Deshacer ultimo punto</button>
           <button id="btn-injerto-restart">Reiniciar dibujo</button>
         </div>
       </div>
       <div id="injerto-step-dims" style="display:none;">
+        <canvas id="injerto-dims-canvas" width="480" height="220"></canvas>
         <div id="injerto-seg-list"></div>
         <div class="injerto-field">
           <label>Espesor de plancha (injerto = plancha madre)</label>
@@ -801,11 +836,14 @@ function startApp() {
   }
 
   // --- Control unificado de camara (mouse y tactil) usando Pointer Events ---
-  // Un puntero = rotar. Dos punteros = pellizcar para zoom + arrastrar para pan.
+  // Un puntero = rotar (o pan, con boton derecho/central, o con boton izquierdo si la
+  // herramienta de pan esta activa). Dos punteros = pellizcar para zoom + arrastrar para pan.
   renderer.domElement.style.touchAction = 'none';
+  renderer.domElement.addEventListener('contextmenu', function(e) { e.preventDefault(); });
   var pointers = {};
   var pinchStartDist = null;
   var panStartMid = null;
+  var panToolActive = false;
 
   function pointDist(a, b) {
     var dx = a.x - b.x, dy = a.y - b.y;
@@ -816,9 +854,11 @@ function startApp() {
   }
 
   renderer.domElement.addEventListener('pointerdown', function(e) {
-    if (tryStartPatchDrag(e)) return;
+    if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 1 && e.button !== 2) return;
+    if (e.button === 0 && tryStartPatchDrag(e)) return;
     renderer.domElement.setPointerCapture(e.pointerId);
-    pointers[e.pointerId] = { x: e.clientX, y: e.clientY, type: e.pointerType };
+    var isPanButton = e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || panToolActive);
+    pointers[e.pointerId] = { x: e.clientX, y: e.clientY, type: e.pointerType, pan: isPanButton };
     var ids = Object.keys(pointers);
     if (ids.length === 2) {
       var p0 = pointers[ids[0]], p1 = pointers[ids[1]];
@@ -832,14 +872,18 @@ function startApp() {
     if (!pointers[e.pointerId]) return;
     var prev = pointers[e.pointerId];
     var dx = e.clientX - prev.x, dy = e.clientY - prev.y;
-    pointers[e.pointerId] = { x: e.clientX, y: e.clientY, type: e.pointerType };
+    pointers[e.pointerId] = { x: e.clientX, y: e.clientY, type: e.pointerType, pan: prev.pan };
     var ids = Object.keys(pointers);
 
     if (ids.length === 1) {
-      var sens = (prev.type === 'touch') ? 0.0025 : 0.005;
-      spherical.theta -= dx * sens;
-      spherical.phi -= dy * sens;
-      spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+      if (prev.pan) {
+        panCamera(dx, dy);
+      } else {
+        var sens = (prev.type === 'touch') ? 0.0025 : 0.005;
+        spherical.theta -= dx * sens;
+        spherical.phi -= dy * sens;
+        spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+      }
       updateCameraFromSpherical();
     } else if (ids.length === 2) {
       var p0 = pointers[ids[0]], p1 = pointers[ids[1]];
@@ -881,6 +925,145 @@ function startApp() {
     spherical.radius = Math.max(minRadius, Math.min(maxRadius, spherical.radius));
     updateCameraFromSpherical();
   }, { passive: false });
+
+  // --- Animacion suave al saltar de una vista a otra (cubo de navegacion / boton inicio) ---
+  var camTween = null; // { fromTheta, deltaTheta, fromPhi, deltaPhi, start, duration }
+  function shortestAngleDelta(from, to) {
+    var d = (to - from) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+  function snapToView(theta, phi, duration) {
+    camTween = {
+      fromTheta: spherical.theta, deltaTheta: shortestAngleDelta(spherical.theta, theta),
+      fromPhi: spherical.phi, deltaPhi: phi - spherical.phi,
+      start: performance.now(), duration: duration || 350
+    };
+  }
+
+  // --- Cubo de navegacion estilo Inventor: clic en una cara o esquina salta a esa vista ---
+  // Se usan las mismas coordenadas esfericas (theta/phi) que la camara principal: theta se
+  // calcula con atan2(x,z) de la direccion clickeada y phi segun si es cara superior/inferior,
+  // cara lateral (ecuador) o esquina (vista isometrica), asi una sola formula sirve para
+  // las 6 caras y las 8 esquinas sin tener que tabular cada vista a mano.
+  function ncViewForDir(sx, sy, sz, isCorner) {
+    var theta = Math.atan2(sx, sz);
+    var phi;
+    if (!isCorner) {
+      phi = (sx === 0 && sz === 0) ? (sy > 0 ? 0.12 : Math.PI - 0.12) : Math.PI / 2;
+    } else {
+      phi = sy > 0 ? Math.PI / 3 : Math.PI - Math.PI / 3;
+    }
+    return { theta: theta, phi: phi };
+  }
+
+  var ncScene = new THREE.Scene();
+  var ncCamera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
+  var ncCanvas = document.getElementById('navcube-canvas');
+  var ncRenderer = new THREE.WebGLRenderer({ canvas: ncCanvas, antialias: true, alpha: true });
+  ncRenderer.setSize(ncCanvas.width, ncCanvas.height, false);
+  ncScene.add(new THREE.AmbientLight(0xffffff, 0.95));
+  var ncLight = new THREE.DirectionalLight(0xffffff, 0.45);
+  ncLight.position.set(1, 1, 1);
+  ncScene.add(ncLight);
+
+  function ncFaceTexture(label) {
+    var c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = '#eeece6';
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.strokeStyle = '#b7b3a7';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(2.5, 2.5, 123, 123);
+    ctx.fillStyle = '#2C2C2A';
+    ctx.font = 'bold 15px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    var words = label.split(' ');
+    if (words.length > 1) {
+      ctx.fillText(words[0], 64, 55);
+      ctx.fillText(words.slice(1).join(' '), 64, 76);
+    } else {
+      ctx.fillText(label, 64, 64);
+    }
+    return new THREE.CanvasTexture(c);
+  }
+
+  // Orden de materiales de THREE.BoxGeometry por cara: [+X, -X, +Y, -Y, +Z, -Z]
+  var NC_FACE_DIRS = [
+    [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]
+  ];
+  var NC_FACE_LABELS = ['DERECHA', 'IZQUIERDA', 'SUPERIOR', 'INFERIOR', 'FRONTAL', 'POSTERIOR'];
+  var ncMaterials = NC_FACE_LABELS.map(function(label) {
+    return new THREE.MeshStandardMaterial({ map: ncFaceTexture(label), roughness: 0.95 });
+  });
+  var ncBoxGeo = new THREE.BoxGeometry(2, 2, 2);
+  var ncBox = new THREE.Mesh(ncBoxGeo, ncMaterials);
+  ncScene.add(ncBox);
+  ncBox.add(new THREE.LineSegments(new THREE.EdgesGeometry(ncBoxGeo), new THREE.LineBasicMaterial({ color: 0xa9a59a })));
+
+  var ncCornerGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+  var ncCornerMeshes = [];
+  [-1, 1].forEach(function(sx) {
+    [-1, 1].forEach(function(sy) {
+      [-1, 1].forEach(function(sz) {
+        var m = new THREE.Mesh(ncCornerGeo, new THREE.MeshStandardMaterial({ color: 0xd6d3c8, roughness: 0.95 }));
+        m.position.set(sx * 1.1, sy * 1.1, sz * 1.1);
+        m.userData.ncDir = { sx: sx, sy: sy, sz: sz };
+        ncScene.add(m);
+        ncCornerMeshes.push(m);
+      });
+    });
+  });
+
+  function updateNavCube() {
+    var offsetDir = offset.clone().normalize();
+    ncCamera.position.copy(offsetDir).multiplyScalar(6.5);
+    ncCamera.lookAt(0, 0, 0);
+    ncRenderer.render(ncScene, ncCamera);
+  }
+
+  var ncRaycaster = new THREE.Raycaster();
+  ncCanvas.addEventListener('click', function(e) {
+    var rect = ncCanvas.getBoundingClientRect();
+    var mx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    var my = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    ncRaycaster.setFromCamera(new THREE.Vector2(mx, my), ncCamera);
+    var cornerHit = ncRaycaster.intersectObjects(ncCornerMeshes, false);
+    if (cornerHit.length > 0) {
+      var d = cornerHit[0].object.userData.ncDir;
+      var v = ncViewForDir(d.sx, d.sy, d.sz, true);
+      snapToView(v.theta, v.phi);
+      return;
+    }
+    var faceHit = ncRaycaster.intersectObject(ncBox, false);
+    if (faceHit.length > 0) {
+      var dir = NC_FACE_DIRS[faceHit[0].face.materialIndex];
+      var v2 = ncViewForDir(dir[0], dir[1], dir[2], false);
+      snapToView(v2.theta, v2.phi);
+    }
+  });
+
+  var panToolBtn = document.getElementById('nc-pan');
+  panToolBtn.addEventListener('click', function() {
+    panToolActive = !panToolActive;
+    panToolBtn.classList.toggle('active', panToolActive);
+    renderer.domElement.style.cursor = panToolActive ? 'move' : 'default';
+  });
+  document.getElementById('nc-fit').addEventListener('click', function() {
+    if (!modelBox) return;
+    target.copy(modelBox.getCenter(new THREE.Vector3()));
+    spherical.radius = modelBox.getSize(new THREE.Vector3()).length() * 1.2;
+    updateCameraFromSpherical();
+  });
+  function resetHomeView() {
+    if (modelBox) target.copy(modelBox.getCenter(new THREE.Vector3()));
+    spherical.radius = defaultSpherical.radius;
+    snapToView(defaultSpherical.theta, defaultSpherical.phi);
+  }
+  document.getElementById('nc-home').addEventListener('click', resetHomeView);
 
   var loader = new THREE.GLTFLoader();
   var raycaster = new THREE.Raycaster();
@@ -1299,10 +1482,51 @@ function startApp() {
   var patchDragState = null;  // { patchId, plane, lastPoint, uAxis, vAxis }
   var injertoPending = null;  // { meshKey, normal, facePoint, uAxis, vAxis } mientras se dibuja
   var injertoPoints = [];     // [{x,y}] en pixeles del canvas de dibujo
+  var injertoHoverPt = null;  // {x,y,deg} previsualizacion del proximo punto ajustado a la guia
   var injertoStep = 1;
+  var injertoSegAngles = [];  // grados (multiplos de 15) de cada segmento dibujado (largo n-1)
+  var injertoSegLens = [];    // mm de cada segmento dibujado (largo n-1), editable en el paso 2
+
+  // El poligono solo permite editar los n-1 segmentos que el usuario efectivamente dibujo
+  // (vertice 0 al vertice n-1); el segmento de cierre (vuelta al vertice 0) queda determinado
+  // por esos y se muestra solo como dato calculado -- si tambien fuera editable libremente
+  // el poligono dejaria de cerrar.
+  var INJERTO_ANGLE_STEP = 15;
+  function injertoSnapAngle(deg) {
+    var snapped = Math.round(deg / INJERTO_ANGLE_STEP) * INJERTO_ANGLE_STEP;
+    return ((snapped % 360) + 360) % 360;
+  }
+  function injertoAngleOf(dx, dy) {
+    var deg = Math.atan2(-dy, dx) * 180 / Math.PI;
+    return ((deg % 360) + 360) % 360;
+  }
+  function injertoDirFromAngle(deg) {
+    var rad = deg * Math.PI / 180;
+    return { dx: Math.cos(rad), dy: -Math.sin(rad) };
+  }
 
   var PATCH_COLOR = 0xE24B4A;
-  var PATCH_OPACITY = 0.55;
+  var PATCH_OPACITY = 0.95;
+  var PATCH_DEFAULT_THICKNESS_MM = 6;
+
+  // Interpreta el espesor ingresado como texto libre ("6 mm", "6", "3/8"", "0.375 in") y lo
+  // devuelve en mm, para poder extruir el injerto con su espesor real. Si no se puede leer,
+  // se usa un espesor por defecto en vez de fallar (el dato de texto igual queda intacto
+  // para el informe).
+  function parseEspesorMm(str) {
+    if (!str) return null;
+    var s = String(str).trim().toLowerCase().replace(',', '.');
+    var frac = s.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*(?:"|in|pulg)?$/);
+    if (frac) {
+      var den = parseFloat(frac[2]);
+      return den ? (parseFloat(frac[1]) / den) * 25.4 : null;
+    }
+    var inches = s.match(/^(\d+(?:\.\d+)?)\s*(?:"|in|pulg)$/);
+    if (inches) return parseFloat(inches[1]) * 25.4;
+    var mm = s.match(/^(\d+(?:\.\d+)?)\s*(?:mm)?$/);
+    if (mm) return parseFloat(mm[1]);
+    return null;
+  }
 
   function buildFaceBasis(normal) {
     var helper = Math.abs(normal.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
@@ -1326,14 +1550,22 @@ function startApp() {
     var shape = new THREE.Shape();
     data.points2D.forEach(function(p, i) { if (i === 0) shape.moveTo(p[0], p[1]); else shape.lineTo(p[0], p[1]); });
     shape.closePath();
-    var geo = new THREE.ShapeGeometry(shape);
 
-    var modelSize = modelBox ? modelBox.getSize(new THREE.Vector3()).length() : 1;
+    // El injerto se modela con volumen real (extruido al espesor real de la plancha, mitad
+    // hacia afuera y mitad hacia adentro de la cara) en vez de un plano 2D -- asi se nota
+    // tanto en la cara donde se hizo clic como en la cara opuesta de la estructura, igual
+    // que un parche soldado real.
+    var thicknessMm = parseEspesorMm(data.espesor) || PATCH_DEFAULT_THICKNESS_MM;
+    var depth = thicknessMm / 1000;
+    var geo = new THREE.ExtrudeGeometry(shape, { depth: depth, bevelEnabled: false });
+    geo.translate(0, 0, -depth / 2);
+
     var m = new THREE.Matrix4().makeBasis(uAxis, vAxis, normal);
-    m.setPosition(facePoint.clone().addScaledVector(normal, modelSize * 0.0015));
+    m.setPosition(facePoint);
     geo.applyMatrix4(m);
+    geo.computeVertexNormals();
 
-    var mat = new THREE.MeshBasicMaterial({ color: PATCH_COLOR, side: THREE.DoubleSide, transparent: true, opacity: PATCH_OPACITY });
+    var mat = new THREE.MeshStandardMaterial({ color: PATCH_COLOR, side: THREE.DoubleSide, transparent: true, opacity: PATCH_OPACITY, roughness: 0.7, metalness: 0.15 });
     var mesh = new THREE.Mesh(geo, mat);
     mesh.userData.isPatch = true;
     var edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x8a1f1e }));
@@ -1468,11 +1700,65 @@ function startApp() {
   var injertoCanvas = document.getElementById('injerto-draw-canvas');
   var injertoCtx = injertoCanvas.getContext('2d');
 
+  // Puntos y rayos de guia a 15 grados desde el ultimo vertice, para que se pueda ver a
+  // simple vista donde cae cada angulo valido antes de hacer clic.
+  function drawInjertoGuides(origin) {
+    var w = injertoCanvas.width, h = injertoCanvas.height;
+    var R = Math.hypot(w, h);
+    injertoCtx.save();
+    injertoCtx.strokeStyle = 'rgba(44,44,42,0.10)';
+    injertoCtx.lineWidth = 1;
+    injertoCtx.setLineDash([3, 4]);
+    for (var deg = 0; deg < 360; deg += INJERTO_ANGLE_STEP) {
+      var dir = injertoDirFromAngle(deg);
+      injertoCtx.beginPath();
+      injertoCtx.moveTo(origin.x, origin.y);
+      injertoCtx.lineTo(origin.x + dir.dx * R, origin.y + dir.dy * R);
+      injertoCtx.stroke();
+    }
+    injertoCtx.setLineDash([]);
+    injertoCtx.fillStyle = 'rgba(44,44,42,0.25)';
+    for (var deg2 = 0; deg2 < 360; deg2 += INJERTO_ANGLE_STEP) {
+      var dir2 = injertoDirFromAngle(deg2);
+      for (var d = 24; d < R; d += 24) {
+        var gx = origin.x + dir2.dx * d, gy = origin.y + dir2.dy * d;
+        if (gx < -2 || gx > w + 2 || gy < -2 || gy > h + 2) continue;
+        injertoCtx.beginPath();
+        injertoCtx.arc(gx, gy, 1.4, 0, Math.PI * 2);
+        injertoCtx.fill();
+      }
+    }
+    injertoCtx.restore();
+  }
+
   function redrawInjertoCanvas() {
     var w = injertoCanvas.width, h = injertoCanvas.height;
     injertoCtx.clearRect(0, 0, w, h);
     injertoCtx.fillStyle = '#f7f6f2';
     injertoCtx.fillRect(0, 0, w, h);
+    if (injertoPoints.length > 0) drawInjertoGuides(injertoPoints[injertoPoints.length - 1]);
+    if (injertoHoverPt && injertoPoints.length > 0) {
+      var last = injertoPoints[injertoPoints.length - 1];
+      injertoCtx.save();
+      injertoCtx.strokeStyle = '#E24B4A';
+      injertoCtx.lineWidth = 1.5;
+      injertoCtx.setLineDash([5, 3]);
+      injertoCtx.beginPath();
+      injertoCtx.moveTo(last.x, last.y);
+      injertoCtx.lineTo(injertoHoverPt.x, injertoHoverPt.y);
+      injertoCtx.stroke();
+      injertoCtx.setLineDash([]);
+      injertoCtx.fillStyle = 'rgba(226,75,74,0.55)';
+      injertoCtx.beginPath();
+      injertoCtx.arc(injertoHoverPt.x, injertoHoverPt.y, 4, 0, Math.PI * 2);
+      injertoCtx.fill();
+      injertoCtx.font = '11px Arial';
+      injertoCtx.fillStyle = '#2C2C2A';
+      injertoCtx.textAlign = 'left';
+      injertoCtx.textBaseline = 'bottom';
+      injertoCtx.fillText(injertoHoverPt.deg + '°', injertoHoverPt.x + 8, injertoHoverPt.y - 6);
+      injertoCtx.restore();
+    }
     if (injertoPoints.length === 0) return;
     injertoCtx.strokeStyle = '#E24B4A';
     injertoCtx.lineWidth = 2;
@@ -1499,43 +1785,178 @@ function startApp() {
     });
   }
 
-  injertoCanvas.addEventListener('click', function(e) {
+  function injertoCanvasPointFromEvent(e) {
     var rect = injertoCanvas.getBoundingClientRect();
-    injertoPoints.push({
+    return {
       x: (e.clientX - rect.left) * (injertoCanvas.width / rect.width),
       y: (e.clientY - rect.top) * (injertoCanvas.height / rect.height)
-    });
+    };
+  }
+
+  injertoCanvas.addEventListener('mousemove', function(e) {
+    if (injertoPoints.length === 0) {
+      if (injertoHoverPt) { injertoHoverPt = null; redrawInjertoCanvas(); }
+      return;
+    }
+    var m = injertoCanvasPointFromEvent(e);
+    var last = injertoPoints[injertoPoints.length - 1];
+    var dx = m.x - last.x, dy = m.y - last.y;
+    var dist = Math.hypot(dx, dy);
+    if (dist < 4) {
+      if (injertoHoverPt) { injertoHoverPt = null; redrawInjertoCanvas(); }
+      return;
+    }
+    var deg = injertoSnapAngle(injertoAngleOf(dx, dy));
+    var dir = injertoDirFromAngle(deg);
+    injertoHoverPt = { x: last.x + dir.dx * dist, y: last.y + dir.dy * dist, deg: deg };
+    redrawInjertoCanvas();
+  });
+  injertoCanvas.addEventListener('mouseleave', function() {
+    if (injertoHoverPt) { injertoHoverPt = null; redrawInjertoCanvas(); }
+  });
+
+  injertoCanvas.addEventListener('click', function(e) {
+    var m = injertoCanvasPointFromEvent(e);
+    var pt;
+    if (injertoPoints.length === 0) {
+      pt = m;
+    } else if (injertoHoverPt) {
+      pt = { x: injertoHoverPt.x, y: injertoHoverPt.y };
+    } else {
+      return;
+    }
+    injertoPoints.push(pt);
+    injertoHoverPt = null;
     redrawInjertoCanvas();
     document.getElementById('btn-injerto-crear').disabled = injertoPoints.length < 3;
   });
   document.getElementById('btn-injerto-undo').addEventListener('click', function() {
     injertoPoints.pop();
+    injertoHoverPt = null;
     redrawInjertoCanvas();
     document.getElementById('btn-injerto-crear').disabled = injertoPoints.length < 3;
   });
   document.getElementById('btn-injerto-restart').addEventListener('click', function() {
     injertoPoints = [];
+    injertoHoverPt = null;
     redrawInjertoCanvas();
     document.getElementById('btn-injerto-crear').disabled = true;
   });
 
-  // --- Paso 2: dimension real de cada segmento + datos de soldadura ---
+  // --- Paso 2: dimension real (largo + angulo) de cada segmento dibujado + datos de soldadura ---
+  // Solo los n-1 segmentos que el usuario efectivamente trazo (A-B, B-C, ...) son editables;
+  // el segmento de cierre (vuelta al vertice A) se recalcula solo, porque si tambien fuera
+  // libre el poligono podria dejar de cerrar.
+  var injertoDimsCanvas = document.getElementById('injerto-dims-canvas');
+  var injertoDimsCtx = injertoDimsCanvas.getContext('2d');
+
+  function injertoWalkVertices(defaultLenMm) {
+    var n = injertoPoints.length;
+    var verts = [{ x: 0, y: 0 }];
+    for (var i = 0; i < n - 1; i++) {
+      var len = injertoSegLens[i] > 0 ? injertoSegLens[i] : defaultLenMm;
+      var dir = injertoDirFromAngle(injertoSegAngles[i]);
+      var prev = verts[verts.length - 1];
+      verts.push({ x: prev.x + dir.dx * len, y: prev.y + dir.dy * len });
+    }
+    var first = verts[0], last = verts[verts.length - 1];
+    var closeDx = first.x - last.x, closeDy = first.y - last.y;
+    return { verts: verts, closeLen: Math.hypot(closeDx, closeDy), closeDeg: injertoAngleOf(closeDx, closeDy) };
+  }
+
+  function redrawInjertoDimsCanvas() {
+    var w = injertoDimsCanvas.width, h = injertoDimsCanvas.height;
+    injertoDimsCtx.clearRect(0, 0, w, h);
+    injertoDimsCtx.fillStyle = '#f7f6f2';
+    injertoDimsCtx.fillRect(0, 0, w, h);
+
+    var walk = injertoWalkVertices(100);
+    var verts = walk.verts;
+    var closeDegEl = document.querySelector('.injerto-seg-computed[data-role="deg"]');
+    var closeMmEl = document.querySelector('.injerto-seg-computed[data-role="mm"]');
+    if (closeDegEl) closeDegEl.textContent = Math.round(walk.closeDeg) + '°';
+    if (closeMmEl) closeMmEl.textContent = walk.closeLen.toFixed(1) + ' mm';
+
+    var minX = Math.min.apply(null, verts.map(function(p) { return p.x; }));
+    var maxX = Math.max.apply(null, verts.map(function(p) { return p.x; }));
+    var minY = Math.min.apply(null, verts.map(function(p) { return p.y; }));
+    var maxY = Math.max.apply(null, verts.map(function(p) { return p.y; }));
+    var pad = 34;
+    var spanX = Math.max(maxX - minX, 1), spanY = Math.max(maxY - minY, 1);
+    var scale = Math.min((w - pad * 2) / spanX, (h - pad * 2) / spanY);
+    var midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
+    var cpts = verts.map(function(p) { return { x: w / 2 + (p.x - midX) * scale, y: h / 2 + (p.y - midY) * scale }; });
+
+    injertoDimsCtx.lineWidth = 2;
+    injertoDimsCtx.strokeStyle = '#E24B4A';
+    injertoDimsCtx.beginPath();
+    cpts.forEach(function(p, i) { if (i === 0) injertoDimsCtx.moveTo(p.x, p.y); else injertoDimsCtx.lineTo(p.x, p.y); });
+    injertoDimsCtx.stroke();
+    // El lado de cierre no lo dibujo el usuario (se calcula), se marca punteado para distinguirlo.
+    injertoDimsCtx.setLineDash([5, 4]);
+    injertoDimsCtx.beginPath();
+    injertoDimsCtx.moveTo(cpts[cpts.length - 1].x, cpts[cpts.length - 1].y);
+    injertoDimsCtx.lineTo(cpts[0].x, cpts[0].y);
+    injertoDimsCtx.stroke();
+    injertoDimsCtx.setLineDash([]);
+    injertoDimsCtx.fillStyle = 'rgba(226,75,74,0.10)';
+    injertoDimsCtx.fill();
+
+    cpts.forEach(function(p, i) {
+      injertoDimsCtx.beginPath();
+      injertoDimsCtx.fillStyle = '#2C2C2A';
+      injertoDimsCtx.arc(p.x, p.y, 9, 0, Math.PI * 2);
+      injertoDimsCtx.fill();
+      injertoDimsCtx.fillStyle = '#fff';
+      injertoDimsCtx.font = 'bold 11px Arial';
+      injertoDimsCtx.textAlign = 'center';
+      injertoDimsCtx.textBaseline = 'middle';
+      injertoDimsCtx.fillText(vertexLetter(i), p.x, p.y);
+    });
+  }
+
   function goToDimsStep() {
     injertoStep = 2;
     document.getElementById('injerto-step-draw').style.display = 'none';
     document.getElementById('injerto-step-dims').style.display = 'block';
-    var listEl = document.getElementById('injerto-seg-list');
-    listEl.innerHTML = '';
     var n = injertoPoints.length;
-    for (var i = 0; i < n; i++) {
-      var a = vertexLetter(i), b = vertexLetter((i + 1) % n);
+
+    // Angulos iniciales = los mismos con que se trazo cada segmento en el paso 1 (ya vienen
+    // en multiplos de 15 porque el clic los ajusta a la guia mas cercana).
+    injertoSegAngles = [];
+    for (var i = 0; i < n - 1; i++) {
+      var p1 = injertoPoints[i], p2 = injertoPoints[i + 1];
+      injertoSegAngles.push(injertoSnapAngle(injertoAngleOf(p2.x - p1.x, p2.y - p1.y)));
+    }
+    injertoSegLens = new Array(n - 1).fill(null);
+
+    var listEl = document.getElementById('injerto-seg-list');
+    listEl.innerHTML = '<div class="injerto-seg-header"><span></span><span>Angulo</span><span>Longitud (mm)</span></div>';
+    for (var i2 = 0; i2 < n; i2++) {
+      var a = vertexLetter(i2), b = vertexLetter((i2 + 1) % n);
       var row = document.createElement('div');
-      row.className = 'injerto-seg-row';
-      row.innerHTML = '<span>' + a + '-' + b + '</span><input type="number" min="0" step="0.1" class="injerto-seg-input" placeholder="mm">';
+      if (i2 < n - 1) {
+        row.className = 'injerto-seg-row';
+        var opts = '';
+        for (var deg = 0; deg < 360; deg += INJERTO_ANGLE_STEP) {
+          opts += '<option value="' + deg + '"' + (deg === injertoSegAngles[i2] ? ' selected' : '') + '>' + deg + '°</option>';
+        }
+        row.innerHTML =
+          '<span>' + a + '-' + b + '</span>' +
+          '<select class="injerto-seg-angle" data-idx="' + i2 + '">' + opts + '</select>' +
+          '<input type="number" min="0" step="0.1" class="injerto-seg-input" data-idx="' + i2 + '" placeholder="mm">';
+      } else {
+        row.className = 'injerto-seg-row injerto-seg-row-closing';
+        row.innerHTML =
+          '<span>' + a + '-' + b + '</span>' +
+          '<span class="injerto-seg-computed" data-role="deg">-</span>' +
+          '<span class="injerto-seg-computed" data-role="mm">-</span>';
+      }
       listEl.appendChild(row);
     }
     document.getElementById('btn-injerto-crear').textContent = 'Crear parche';
     document.getElementById('btn-injerto-crear').disabled = true;
+    redrawInjertoDimsCanvas();
   }
 
   function validateDimsStep() {
@@ -1544,31 +1965,46 @@ function startApp() {
     var espesorOk = document.getElementById('injerto-espesor').value.trim().length > 0;
     document.getElementById('btn-injerto-crear').disabled = !(allFilled && espesorOk);
   }
-  document.getElementById('injerto-seg-list').addEventListener('input', validateDimsStep);
+  document.getElementById('injerto-seg-list').addEventListener('input', function(e) {
+    if (e.target.classList.contains('injerto-seg-input')) {
+      var idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      injertoSegLens[idx] = parseFloat(e.target.value);
+      redrawInjertoDimsCanvas();
+    }
+    validateDimsStep();
+  });
+  document.getElementById('injerto-seg-list').addEventListener('change', function(e) {
+    if (e.target.classList.contains('injerto-seg-angle')) {
+      var idx = parseInt(e.target.getAttribute('data-idx'), 10);
+      injertoSegAngles[idx] = parseInt(e.target.value, 10);
+      redrawInjertoDimsCanvas();
+    }
+  });
   document.getElementById('injerto-espesor').addEventListener('input', validateDimsStep);
 
   function createInjertoFromForm() {
     var inputs = document.querySelectorAll('.injerto-seg-input');
-    var segMm = Array.prototype.map.call(inputs, function(inp) { return parseFloat(inp.value); });
+    var lens = Array.prototype.map.call(inputs, function(inp) { return parseFloat(inp.value); });
     var n = injertoPoints.length;
+    injertoSegLens = lens;
 
-    var pxLens = [];
-    for (var i = 0; i < n; i++) {
-      var p1 = injertoPoints[i], p2 = injertoPoints[(i + 1) % n];
-      pxLens.push(Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1);
+    var verts = [{ x: 0, y: 0 }];
+    for (var i = 0; i < n - 1; i++) {
+      var dir = injertoDirFromAngle(injertoSegAngles[i]);
+      var prev = verts[verts.length - 1];
+      verts.push({ x: prev.x + dir.dx * lens[i], y: prev.y + dir.dy * lens[i] });
     }
-    // Factor de escala unico (promedio real/dibujado) para pasar el boceto a proporcion
-    // real preservando la forma/angulos dibujados. El dato exacto por segmento queda
-    // guardado igual como metadato para el informe, aunque el poligono 3D renderizado sea
-    // una aproximacion a escala uniforme del boceto -- esto documenta terreno, no es un
-    // acotado de precision tipo CAD.
-    var scaleMPerPx = (segMm.reduce(function(sum, mm, i) { return sum + mm / pxLens[i]; }, 0) / n) / 1000;
+    var first = verts[0], last = verts[verts.length - 1];
+    var closeLen = Math.hypot(first.x - last.x, first.y - last.y);
+    var closeDeg = Math.round(injertoAngleOf(first.x - last.x, first.y - last.y));
+    var segMm = lens.concat([closeLen]);
+    var segDeg = injertoSegAngles.concat([closeDeg]);
 
-    var cx = injertoPoints.reduce(function(s, p) { return s + p.x; }, 0) / n;
-    var cy = injertoPoints.reduce(function(s, p) { return s + p.y; }, 0) / n;
-    var points2D = injertoPoints.map(function(p) {
-      return [(p.x - cx) * scaleMPerPx, -(p.y - cy) * scaleMPerPx];
-    });
+    var cx = verts.reduce(function(s, p) { return s + p.x; }, 0) / n;
+    var cy = verts.reduce(function(s, p) { return s + p.y; }, 0) / n;
+    // Los vertices ya son las medidas reales (mm) tal como quedaron editadas -- se pasan
+    // directo a metros, sin factor de escala aproximado como antes.
+    var points2D = verts.map(function(p) { return [(p.x - cx) / 1000, -(p.y - cy) / 1000]; });
 
     var pending = injertoPending;
     var data = {
@@ -1579,7 +2015,7 @@ function startApp() {
       vAxis: [pending.vAxis.x, pending.vAxis.y, pending.vAxis.z],
       points2D: points2D,
       vertexLabels: injertoPoints.map(function(_, i) { return vertexLetter(i); }),
-      segmentDims: segMm.map(function(mm, i) { return { seg: vertexLetter(i) + '-' + vertexLetter((i + 1) % n), mm: mm }; }),
+      segmentDims: segMm.map(function(mm, i) { return { seg: vertexLetter(i) + '-' + vertexLetter((i + 1) % n), mm: mm, deg: segDeg[i] }; }),
       espesor: document.getElementById('injerto-espesor').value.trim(),
       proceso: document.getElementById('injerto-proceso').value,
       electrodo: document.getElementById('injerto-electrodo').value.trim(),
@@ -1602,6 +2038,9 @@ function startApp() {
     document.getElementById('injerto-modal-overlay').classList.remove('open');
     injertoPending = null;
     injertoPoints = [];
+    injertoHoverPt = null;
+    injertoSegAngles = [];
+    injertoSegLens = [];
     injertoStep = 1;
     document.getElementById('injerto-step-draw').style.display = 'block';
     document.getElementById('injerto-step-dims').style.display = 'none';
@@ -1626,6 +2065,9 @@ function startApp() {
     var basis = buildFaceBasis(normal);
     injertoPending = { meshKey: meshKey, normal: normal, facePoint: intersect.point.clone(), uAxis: basis.uAxis, vAxis: basis.vAxis };
     injertoPoints = [];
+    injertoHoverPt = null;
+    injertoSegAngles = [];
+    injertoSegLens = [];
     injertoStep = 1;
     document.getElementById('injerto-step-draw').style.display = 'block';
     document.getElementById('injerto-step-dims').style.display = 'none';
@@ -1976,9 +2418,18 @@ function startApp() {
   var clock = new THREE.Clock();
   function animate() {
     requestAnimationFrame(animate);
+    if (camTween) {
+      var t = Math.min(1, (performance.now() - camTween.start) / camTween.duration);
+      var ease = 1 - Math.pow(1 - t, 3);
+      spherical.theta = camTween.fromTheta + camTween.deltaTheta * ease;
+      spherical.phi = camTween.fromPhi + camTween.deltaPhi * ease;
+      updateCameraFromSpherical();
+      if (t >= 1) camTween = null;
+    }
     updateFlowMarkers(clock.getElapsedTime());
     updateDeleteBadgePosition();
     renderer.render(scene, camera);
+    updateNavCube();
   }
 
   window.addEventListener('resize', function() {
@@ -2280,22 +2731,20 @@ function startApp() {
     return { dataUrl: result.dataUrl, aspect: aspect, labels: labels };
   }
 
-  // Igual que snapshotFullChuteWithLabels pero para injertos: aca lo que importa es la
-  // estructura, asi que placas/lifters quedan atenuadas y la estructura + los parches se
-  // ven a color pleno. Cada etiqueta es el numero de injerto (mismo orden/numeracion que
-  // la seccion de detalle de injertos del informe).
+  // Igual que snapshotFullChuteWithLabels pero para injertos: aca lo que importa es
+  // exclusivamente la estructura, asi que placas/lifters/placas guia (cualquier categoria
+  // que no sea "estructura") se ocultan por completo -- no solo se atenuan -- para que no
+  // compitan visualmente con el injerto. La estructura + los parches se ven a color pleno.
   function snapshotFullChuteWithInjertoLabels(patchOrder) {
     if (!modelBox) return null;
     var center = modelBox.getCenter(new THREE.Vector3());
     var size = modelBox.getSize(new THREE.Vector3()).length() || 1;
 
-    var savedOpacity = {}, savedTransparent = {};
+    var savedVisible = {};
     Object.keys(meshStates).forEach(function(k) {
       var e = meshStates[k];
-      savedOpacity[k] = e.mesh.material.opacity;
-      savedTransparent[k] = e.mesh.material.transparent;
-      e.mesh.material.transparent = true;
-      e.mesh.material.opacity = (e.category === 'estructura') ? 1 : 0.15;
+      savedVisible[k] = e.mesh.visible;
+      e.mesh.visible = (e.category === 'estructura');
     });
     var flowGroups = flowMarkers.concat(entryMarkers);
     var savedFlowVisible = flowGroups.map(function(p) { return p.front.visible; });
@@ -2320,11 +2769,7 @@ function startApp() {
       return { num: entry.num, u: proj.x * 0.5 + 0.5, v: -proj.y * 0.5 + 0.5, onScreen: proj.z < 1 };
     });
 
-    Object.keys(meshStates).forEach(function(k) {
-      var e = meshStates[k];
-      e.mesh.material.opacity = savedOpacity[k];
-      e.mesh.material.transparent = savedTransparent[k];
-    });
+    Object.keys(meshStates).forEach(function(k) { meshStates[k].mesh.visible = savedVisible[k]; });
     flowGroups.forEach(function(p, i) { p.front.visible = savedFlowVisible[i]; p.ghost.visible = savedFlowVisible[i]; });
     target.copy(savedTarget);
     spherical.theta = savedTheta; spherical.phi = savedPhi; spherical.radius = savedRadius;
@@ -2929,6 +3374,9 @@ function startApp() {
 
       newPage();
       sectionHeader('Injertos en estructura');
+      // Espacio extra para que el marco rojo del primer injerto (que arranca 7mm arriba de
+      // su titulo) no se entrecruce con el titulo de la seccion recien dibujado.
+      y += 8;
 
       var idx = 0;
       patchIds.forEach(function(id) {
@@ -3122,12 +3570,7 @@ function startApp() {
     statusEl.textContent = 'Informe generado.';
   }
 
-  document.getElementById('btn-reset').addEventListener('click', function() {
-    spherical.theta = defaultSpherical.theta;
-    spherical.phi = defaultSpherical.phi;
-    spherical.radius = defaultSpherical.radius;
-    updateCameraFromSpherical();
-  });
+  document.getElementById('btn-reset').addEventListener('click', resetHomeView);
 }
 </script>
 </body>
