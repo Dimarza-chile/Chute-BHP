@@ -439,6 +439,7 @@ function startApp() {
           match: function(name) { return /(^|[^A-Za-z])PL-/i.test(name) || /^Placa/i.test(name); },
           mode: "estado",
           baseColor: COLOR_LIGHTGRAY,
+          codePrefix: "PL",
           states: [
             { name: "No inspeccionado", color: COLOR_LIGHTGRAY, pdfColor: "steel" },
             { name: "Cambio", color: COLOR_GREEN, pdfColor: "green" },
@@ -450,6 +451,7 @@ function startApp() {
           match: function(name) { return /(^|[^A-Za-z])LF-/i.test(name) || /^Lifter/i.test(name); },
           mode: "estado",
           baseColor: COLOR_LIGHTGRAY,
+          codePrefix: "LF",
           states: [
             { name: "No inspeccionado", color: COLOR_LIGHTGRAY, pdfColor: "steel" },
             { name: "Cambio", color: COLOR_GREEN, pdfColor: "green" },
@@ -661,6 +663,39 @@ function startApp() {
       if (!canonicalBySig[sig]) canonicalBySig[sig] = raw;
       if (canonicalBySig[sig] !== raw) codeRemap[raw] = canonicalBySig[sig];
     });
+  }
+
+  // Codigo de PANTALLA (ej. "PL-01", "LF-02"), separado del codigo interno usado como clave
+  // de Firebase/agrupamiento -- asi el nombre que ve el usuario queda uniforme y numerado sin
+  // tocar las claves ya guardadas (pernosConfig sigue indexado por el codigo interno de
+  // siempre, para no perder configuraciones ya cargadas). Solo se genera para categorias con
+  // "codePrefix" definido; si no tiene, se muestra el codigo interno tal cual (compatibilidad
+  // con chutes que ya usan su propia convencion, ej. Pg-/Pm- en CV-201).
+  var displayCodeMap = {};
+  function buildDisplayCodeMap() {
+    var codesByCategory = {};
+    Object.keys(meshStates).forEach(function(k) {
+      var e = meshStates[k];
+      if (CATEGORIES[e.category].mode !== 'estado') return;
+      var code = getPlateCode(e.label);
+      var set = (codesByCategory[e.category] = codesByCategory[e.category] || {});
+      set[code] = true;
+    });
+    displayCodeMap = {};
+    Object.keys(codesByCategory).forEach(function(catKey) {
+      var prefix = CATEGORIES[catKey].codePrefix;
+      if (!prefix) return;
+      var codes = Object.keys(codesByCategory[catKey]).sort();
+      var pad = Math.max(2, String(codes.length).length);
+      codes.forEach(function(code, i) {
+        var num = String(i + 1);
+        while (num.length < pad) num = '0' + num;
+        displayCodeMap[catKey + '|' + code] = prefix + '-' + num;
+      });
+    });
+  }
+  function getDisplayCode(code, category) {
+    return displayCodeMap[category + '|' + code] || code;
   }
 
   // --- Dibujo esquematico (no foto) de la cabeza del perno CON su marca de grado ---
@@ -1410,6 +1445,7 @@ function startApp() {
       });
 
       buildCodeRemap();
+      buildDisplayCodeMap();
 
       var flowAxis = computeFlowAxis3D();
       var entryProjSign = addEntryArrow(box, flowAxis);
@@ -2160,36 +2196,53 @@ function startApp() {
       cxx += dx * dx; cxy += dx * dy; cxz += dx * dz;
       cyy += dy * dy; cyz += dy * dz; czz += dz * dz;
     }
-    function matVec(v) {
-      return new THREE.Vector3(
-        cxx * v.x + cxy * v.y + cxz * v.z,
-        cxy * v.x + cyy * v.y + cyz * v.z,
-        cxz * v.x + cyz * v.y + czz * v.z
-      );
-    }
-    function powerIteration(seed) {
-      var v = seed.clone().normalize();
-      for (var it = 0; it < 60; it++) {
-        var nv = matVec(v);
-        if (nv.lengthSq() < 1e-14) break;
-        v = nv.normalize();
-      }
-      return v;
-    }
+    // Vectores propios EXACTOS de la matriz de covarianza simetrica 3x3 (formula
+    // trigonometrica cerrada, no iteracion de potencias). Con iteracion de potencias, dos
+    // instancias de la misma pieza (ej. una placa y su copia espejada _MIR) podian dar ejes
+    // ligeramente distintos por diferencias de convergencia numerica -- eso hacia que la
+    // misma placa midiera, por ejemplo, 60mm en una copia y 63mm en otra. La formula cerrada
+    // es determinista y no depende de semillas ni de cuantas iteraciones convergieron.
+    var p1 = cxy * cxy + cxz * cxz + cyz * cyz;
+    var q = (cxx + cyy + czz) / 3;
+    var v1, v2, v3;
+    if (p1 < 1e-12) {
+      // Covarianza ya diagonal (o casi): los ejes propios son los ejes locales.
+      var eigsD = [cxx, cyy, czz];
+      var vecsD = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+      var idxD = [0, 1, 2].sort(function(a, b) { return eigsD[b] - eigsD[a]; });
+      v1 = vecsD[idxD[0]]; v2 = vecsD[idxD[1]]; v3 = vecsD[idxD[2]];
+    } else {
+      var p2 = (cxx - q) * (cxx - q) + (cyy - q) * (cyy - q) + (czz - q) * (czz - q) + 2 * p1;
+      var p = Math.sqrt(p2 / 6);
+      var bxx = (cxx - q) / p, byy = (cyy - q) / p, bzz = (czz - q) / p, bxy = cxy / p, bxz = cxz / p, byz = cyz / p;
+      var detB = bxx * (byy * bzz - byz * byz) - bxy * (bxy * bzz - byz * bxz) + bxz * (bxy * byz - byy * bxz);
+      var r = Math.max(-1, Math.min(1, detB / 2));
+      var phi = Math.acos(r) / 3;
+      var eig1 = q + 2 * p * Math.cos(phi);
+      var eig3 = q + 2 * p * Math.cos(phi + 2 * Math.PI / 3);
+      var eig2 = 3 * q - eig1 - eig3;
 
-    var v1 = powerIteration(new THREE.Vector3(1, 0.37, 0.61));
-    var lambda1 = matVec(v1).dot(v1);
-    var seed2 = new THREE.Vector3(0.53, -0.71, 0.29);
-    seed2.addScaledVector(v1, -v1.dot(seed2));
-    var v2 = seed2.lengthSq() > 1e-10 ? seed2.normalize() : new THREE.Vector3(0, 1, 0);
-    for (var it2 = 0; it2 < 60; it2++) {
-      var nv2 = matVec(v2);
-      nv2.addScaledVector(v1, -lambda1 * v1.dot(v2)); // deflacion: descuenta la componente ya hallada
-      nv2.addScaledVector(v1, -v1.dot(nv2)); // refuerza ortogonalidad exacta contra v1
-      if (nv2.lengthSq() < 1e-14) break;
-      v2 = nv2.normalize();
+      var eigVec = function(lambda) {
+        // El vector propio es perpendicular a dos filas cualesquiera de (C - lambda*I); se
+        // toma el producto cruz de mayor magnitud entre las 3 combinaciones posibles, para
+        // evitar perder precision cuando dos filas quedan casi paralelas.
+        var row0 = new THREE.Vector3(cxx - lambda, cxy, cxz);
+        var row1 = new THREE.Vector3(cxy, cyy - lambda, cyz);
+        var row2 = new THREE.Vector3(cxz, cyz, czz - lambda);
+        var c01 = new THREE.Vector3().crossVectors(row0, row1);
+        var c02 = new THREE.Vector3().crossVectors(row0, row2);
+        var c12 = new THREE.Vector3().crossVectors(row1, row2);
+        var best = c01, bestLenSq = c01.lengthSq();
+        if (c02.lengthSq() > bestLenSq) { best = c02; bestLenSq = c02.lengthSq(); }
+        if (c12.lengthSq() > bestLenSq) { best = c12; bestLenSq = c12.lengthSq(); }
+        return bestLenSq > 1e-18 ? best.normalize() : null;
+      };
+      v1 = eigVec(eig1) || new THREE.Vector3(1, 0, 0);
+      var v2raw = eigVec(eig2);
+      if (v2raw) v2raw.addScaledVector(v1, -v1.dot(v2raw)); // ortogonalidad exacta contra v1
+      v2 = (v2raw && v2raw.lengthSq() > 1e-16) ? v2raw.normalize() : new THREE.Vector3().crossVectors(v1, Math.abs(v1.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize();
+      v3 = new THREE.Vector3().crossVectors(v1, v2).normalize();
     }
-    var v3 = new THREE.Vector3().crossVectors(v1, v2).normalize();
 
     var minA = Infinity, maxA = -Infinity, minB = Infinity, maxB = -Infinity, minC = Infinity, maxC = -Infinity;
     for (var i3 = 0; i3 < n; i3++) {
@@ -2249,14 +2302,15 @@ function startApp() {
     var cfg = pernosConfig[code] || {};
     var dims = pieceDimsMm(groupInfo.sample.mesh);
     var catLabel = CATEGORIES[groupInfo.category].label;
+    var displayCode = getDisplayCode(code, groupInfo.category);
     var row = document.createElement('div');
     row.className = 'pernos-row';
-    row.dataset.code = code;
+    row.dataset.code = code; // codigo interno (clave de Firebase) -- no cambia con el renombrado de pantalla
     row.dataset.dims = dims.join('x');
 
     var thumb = document.createElement('img');
     thumb.className = 'pernos-row-thumb';
-    thumb.alt = code;
+    thumb.alt = displayCode;
     thumb.src = snapshotPieceThumbnail(groupInfo.sample.mesh).dataUrl;
     row.appendChild(thumb);
 
@@ -2266,7 +2320,7 @@ function startApp() {
 
     var title = document.createElement('div');
     title.className = 'pernos-row-title';
-    title.innerHTML = '<strong>' + code + '</strong><span>' + catLabel + ' &middot; x' + groupInfo.count +
+    title.innerHTML = '<strong>' + displayCode + '</strong><span>' + catLabel + ' &middot; x' + groupInfo.count +
       ' en el chute &middot; placa aprox. ' + dims[0] + '&times;' + dims[1] + '&times;' + dims[2] + ' mm</span>';
     content.appendChild(title);
 
@@ -3103,7 +3157,7 @@ function startApp() {
         var rowH = 6;
 
         doc.setFontSize(8.5);
-        var codeColW = Math.max.apply(null, codes.map(function(c) { return doc.getTextWidth(c); })) + 6;
+        var codeColW = Math.max.apply(null, codes.map(function(c) { return doc.getTextWidth(getDisplayCode(c, catKey)); })) + 6;
         codeColW = Math.min(Math.max(codeColW, 24), contentW * 0.36);
         var colW = (contentW - codeColW) / (states.length + 1);
 
@@ -3137,7 +3191,7 @@ function startApp() {
           doc.setFontSize(7.8);
           doc.setFont(undefined, 'normal');
           doc.setTextColor(40, 40, 40);
-          doc.text(code, margin + 2, y + rowH - 2, { maxWidth: codeColW - 3 });
+          doc.text(getDisplayCode(code, catKey), margin + 2, y + rowH - 2, { maxWidth: codeColW - 3 });
           states.forEach(function(s, i) {
             doc.text(String(info.states[s.name] || 0), margin + codeColW + i * colW + colW / 2, y + rowH - 2, { align: 'center' });
           });
@@ -3255,7 +3309,7 @@ function startApp() {
         doc.setFontSize(10.5);
         doc.setFont(undefined, 'bold');
         doc.setTextColor.apply(doc, C_DARK);
-        doc.text(code + '  (' + CATEGORIES[g.category].label + ', x' + g.count + ' en el chute)', margin, y);
+        doc.text(getDisplayCode(code, g.category) + '  (' + CATEGORIES[g.category].label + ', x' + g.count + ' en el chute)', margin, y);
         y += 5;
 
         var blockTop = y;
